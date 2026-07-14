@@ -289,9 +289,14 @@ def _load_faiss() -> Any:
     return module
 
 
+def _runtime_platform() -> str:
+    """Read the runtime platform without static target folding."""
+    return sys.platform
+
+
 def _validate_faiss_openmp_runtime(module: Any) -> None:
     """Reject known macOS wheels that would abort on duplicate OpenMP runtimes."""
-    if sys.platform != "darwin":
+    if _runtime_platform() != "darwin":
         return
     module_file = getattr(module, "__file__", None)
     torch_file = getattr(torch, "__file__", None)

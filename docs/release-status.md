@@ -15,8 +15,8 @@ become `PASS`.
 | uv lock and frozen base sync | `PASS` | Python 3.12.13 environment resolved from `uv.lock` |
 | Upstream MS-SWIFT and Qwen source audit | `PASS` | Architecture audit and ADR with immutable revisions |
 | Two-rank CPU/Gloo distributed verifier | `PASS` | Two torchrun tests passed with `uv run pytest --no-cov -m distributed` |
-| Integrated Python 3.12 `make check`, including coverage | `PASS` | 902 tests passed; 94.66% total branch coverage; Ruff, strict mypy, import contracts, and vulture passed |
-| Python 3.11 verification | `PASS` | 902 tests passed on Python 3.11.15 in a fresh isolated environment resolved from `uv.lock` |
+| Integrated Python 3.12 `make check`, including coverage | `PASS` | 902 tests passed; 94.66% total branch coverage; Ruff, strict Linux-target and macOS-target mypy, import contracts, and vulture passed |
+| Python 3.11 verification | `PASS` | 902 tests passed on Python 3.11.15 in a fresh isolated environment resolved from `uv.lock`, including both mypy platform targets |
 | Dependency, import, and dead-code audit | `PASS` | Both import contracts held; vulture passed; current-platform exports and a marker-independent audit of all 95 registry pins in `uv.lock`, including FAISS and Linux-only CUDA pins, had no known advisories |
 | Documentation consistency, links, and punctuation | `PASS` | All 35 documentation files passed punctuation and byte checks; all 34 Markdown files passed local-link, anchor, fence, and JSON-example validation |
 | Wheel and source archive build | `PASS` | Hatch built `mira_embed-0.1.0-py3-none-any.whl` and `mira_embed-0.1.0.tar.gz` through uv |

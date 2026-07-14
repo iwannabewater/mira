@@ -19,7 +19,8 @@ lint: sync
 	uv run --no-sync ruff check .
 
 typecheck: sync
-	uv run --no-sync mypy src
+	uv run --no-sync mypy --platform linux src
+	uv run --no-sync mypy --platform darwin src
 
 test: sync
 	uv run --no-sync pytest
@@ -46,7 +47,8 @@ check: sync
 	uv lock --check
 	uv run --no-sync ruff format --check .
 	uv run --no-sync ruff check .
-	uv run --no-sync mypy src
+	uv run --no-sync mypy --platform linux src
+	uv run --no-sync mypy --platform darwin src
 	uv run --no-sync lint-imports
 	uv run --no-sync vulture src/mira
 	uv run --no-sync pytest

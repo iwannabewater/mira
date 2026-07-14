@@ -58,7 +58,10 @@ make sync
 make check
 ```
 
-`uv.lock` is the dependency record. Ruff owns formatting and linting; mypy runs in strict mode. Pytest enforces branch coverage, mathematical checks, property tests, distributed tests, and the tiny end-to-end reference loop.
+`uv.lock` is the dependency record. Ruff owns formatting and linting; mypy runs
+in strict mode against both supported platform targets, Linux and macOS. Pytest
+enforces branch coverage, mathematical checks, property tests, distributed
+tests, and the tiny end-to-end reference loop.
 
 ## Release honesty
 

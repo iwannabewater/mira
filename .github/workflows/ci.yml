@@ -44,7 +44,10 @@ jobs:
           test "$actual" = "$EXPECTED_PYTHON"
       - run: uv run --no-sync ruff format --check .
       - run: uv run --no-sync ruff check .
-      - run: uv run --no-sync mypy src
+      - name: Type-check supported platforms
+        run: |
+          uv run --no-sync mypy --platform linux src
+          uv run --no-sync mypy --platform darwin src
       - run: uv run --no-sync lint-imports
       - run: uv run --no-sync vulture src/mira
       - run: uv run --no-sync pytest -m "not smoke"
