@@ -1,0 +1,215 @@
+[build-system]
+requires = ["editables==0.5", "hatchling==1.31.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mira-embed"
+dynamic = ["version"]
+description = "Research and reference infrastructure for multimodal embedding post-training"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "MIRA contributors" }]
+keywords = [
+  "embedding",
+  "information-retrieval",
+  "multimodal",
+  "pytorch",
+  "representation-learning",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: MacOS :: MacOS X",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "numpy>=1.26.4,<2.5",
+  "pydantic>=2.11,<3",
+  "pyyaml>=6.0.2,<7",
+  "torch>=2.8,<3",
+  "typer>=0.16,<1",
+]
+
+[project.optional-dependencies]
+faiss = ["faiss-cpu>=1.11,<2; platform_system == 'Linux'"]
+
+[project.scripts]
+mira = "mira.cli.app:app"
+
+[project.urls]
+Documentation = "https://github.com/iwannabewater/mira/tree/main/docs"
+Issues = "https://github.com/iwannabewater/mira/issues"
+Repository = "https://github.com/iwannabewater/mira"
+
+[dependency-groups]
+dev = [
+  "build>=1.2.2,<2",
+  "editables==0.5",
+  "hatchling==1.31.0",
+  "hypothesis>=6.135,<7",
+  "import-linter>=2.3,<3",
+  "mypy>=1.17,<2",
+  "pip-audit>=2.9,<3",
+  "pre-commit>=4.2,<5",
+  "pytest>=9.0.3,<10",
+  "pytest-cov>=6.2,<8",
+  "ruff>=0.15.17,<0.16",
+  "types-pyyaml>=6.0.12,<7",
+  "vulture>=2.14,<3",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/configs",
+  "/docs",
+  "/AGENTS.md",
+  "/CLAUDE.md",
+  "/CHANGELOG.md",
+  "/CONTRIBUTING.md",
+  "/LICENSE",
+  "/NOTICE",
+  "/README.md",
+  "/SECURITY.md",
+  "/.importlinter",
+  "/.pre-commit-config.yaml",
+  "/.python-version",
+  "/Makefile",
+  "/uv.lock",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mira"]
+
+[tool.hatch.version]
+path = "src/mira/version.py"
+
+[tool.uv]
+required-version = ">=0.11.21"
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.format]
+docstring-code-format = true
+line-ending = "lf"
+quote-style = "double"
+
+[tool.ruff.lint]
+select = [
+  "A",
+  "ARG",
+  "ASYNC",
+  "B",
+  "BLE",
+  "C4",
+  "D",
+  "DTZ",
+  "E",
+  "ERA",
+  "F",
+  "FA",
+  "FBT",
+  "FLY",
+  "FURB",
+  "G",
+  "I",
+  "ICN",
+  "INP",
+  "INT",
+  "ISC",
+  "LOG",
+  "N",
+  "PERF",
+  "PGH",
+  "PIE",
+  "PL",
+  "PT",
+  "PTH",
+  "PYI",
+  "RET",
+  "RSE",
+  "RUF",
+  "S",
+  "SIM",
+  "SLOT",
+  "T10",
+  "TC",
+  "TID",
+  "TRY",
+  "UP",
+  "W",
+  "YTT",
+]
+ignore = ["D203", "D213", "ISC001", "TRY003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["ARG", "D", "PLR2004", "S101"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+strict = true
+warn_unreachable = true
+show_error_codes = true
+pretty = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["yaml", "yaml.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = [
+  "--strict-config",
+  "--strict-markers",
+  "--showlocals",
+  "--cov=mira",
+  "--cov-branch",
+  "--cov-report=term-missing:skip-covered",
+  "--cov-fail-under=90",
+]
+testpaths = ["tests"]
+markers = [
+  "distributed: launches two or more local processes",
+  "integration: exercises more than one package boundary",
+  "optional: requires an optional dependency",
+  "smoke: exercises an installed or external runtime",
+]
+
+[tool.coverage.run]
+branch = true
+parallel = true
+patch = ["subprocess"]
+source = ["mira"]
+
+[tool.coverage.report]
+fail_under = 90
+precision = 2
+show_missing = true
+skip_covered = true
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+  "raise NotImplementedError",
+]
+
+[tool.vulture]
+min_confidence = 90
+paths = ["src/mira"]
+sort_by_size = true

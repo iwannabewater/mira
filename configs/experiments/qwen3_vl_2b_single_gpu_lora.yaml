@@ -1,0 +1,109 @@
+schema_version: 1
+
+project:
+  name: mira-qwen3-vl-embedding-2b-single-gpu
+  seed: 42
+
+backend:
+  type: ms_swift
+
+model:
+  name_or_path: Qwen/Qwen3-VL-Embedding-2B
+  revision: 9f2f7e710d6d81056aa5c0a4f04764fec6bb7bda
+  licenses:
+    - Apache-2.0
+  adapter: qwen3_vl_embedding
+  hidden_size: 2048
+  representation:
+    type: global
+    pooling: native
+    normalize: true
+  tuning:
+    method: lora
+    lora:
+      rank: 16
+      alpha: 32
+      dropout: 0.05
+      target_modules: all-linear
+    components:
+      vision:
+        trainable: false
+      aligner:
+        trainable: true
+        learning_rate: 1.0e-5
+      language_model:
+        trainable: true
+        learning_rate: 3.0e-5
+
+data:
+  train:
+    - name: retrieval-train
+      path: data/train.jsonl
+      task_id: multimodal_retrieval
+      licenses: [NOASSERTION]
+      weight: 1.0
+  validation:
+    path: data/validation.jsonl
+    licenses: [NOASSERTION]
+  sampler:
+    type: no_duplicate
+    homogeneous_global_batch: true
+    duplicate_keys:
+      - canonical_product_id
+      - image_hash_group
+  media:
+    image_max_tokens: 768
+    validate_on_startup: true
+
+objectives:
+  - name: retrieval
+    type: multi_positive_infonce
+    weight: 1.0
+    temperature:
+      type: fixed
+      value: 0.07
+    negatives:
+      in_batch: true
+      cross_device: false
+      cross_device_gradient: none
+      explicit_hard_negatives: 4
+    false_negative_mask:
+      enabled: true
+      metadata_rules: true
+  - name: matryoshka
+    type: matryoshka
+    weight: 1.0
+    dimensions:
+      512: 0.2
+      1024: 0.3
+      2048: 0.5
+
+runtime:
+  precision: bf16
+  attention: sdpa
+  gradient_checkpointing: true
+  padding_free: false
+  train_batch_size_per_device: 2
+  gradient_accumulation_steps: 1
+  distributed:
+    strategy: single
+  optimizer:
+    type: adamw
+    weight_decay: 0.01
+  scheduler:
+    type: cosine
+    warmup_ratio: 0.05
+  epochs: 1
+
+evaluation:
+  metrics:
+    - recall@1
+    - recall@10
+    - mrr@10
+    - ndcg@10
+  dimensions:
+    - 512
+    - 1024
+    - 2048
+  slices:
+    - modality_pair

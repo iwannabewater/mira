@@ -1,0 +1,136 @@
+schema_version: 1
+
+project:
+  name: mira-qwen3-vl-embedding-ecommerce
+  seed: 42
+
+backend:
+  type: ms_swift
+
+model:
+  name_or_path: Qwen/Qwen3-VL-Embedding-8B
+  revision: 2c4565515e0f265c6511776e7193b22c0968ddc7
+  licenses:
+    - Apache-2.0
+  adapter: qwen3_vl_embedding
+  hidden_size: 4096
+
+  representation:
+    type: global
+    pooling: native
+    normalize: true
+
+  tuning:
+    method: lora
+
+    lora:
+      rank: 16
+      alpha: 32
+      dropout: 0.05
+      target_modules: all-linear
+
+    components:
+      vision:
+        trainable: false
+      aligner:
+        trainable: true
+        learning_rate: 1.0e-5
+      language_model:
+        trainable: true
+        learning_rate: 5.0e-5
+
+data:
+  train:
+    - name: ecommerce-image-to-product
+      path: data/train.jsonl
+      task_id: image_to_multimodal
+      licenses: [NOASSERTION]
+      weight: 0.60
+    - name: general-replay
+      path: data/general_replay.jsonl
+      task_id: mixed_general
+      licenses: [NOASSERTION]
+      weight: 0.20
+    - name: ocr-and-screenshot
+      path: data/ocr.jsonl
+      task_id: image_text_to_multimodal
+      licenses: [NOASSERTION]
+      weight: 0.10
+    - name: text-retrieval-replay
+      path: data/text_retrieval.jsonl
+      task_id: text_to_text
+      licenses: [NOASSERTION]
+      weight: 0.10
+  validation:
+    path: data/validation.jsonl
+    licenses: [NOASSERTION]
+  sampler:
+    type: modality_balanced_no_duplicate
+    homogeneous_global_batch: true
+    duplicate_keys:
+      - canonical_product_id
+      - image_hash_group
+  media:
+    image_max_tokens: 768
+    validate_on_startup: true
+
+objectives:
+  - name: retrieval
+    type: multi_positive_infonce
+    weight: 1.0
+    temperature:
+      type: fixed
+      value: 0.07
+    negatives:
+      in_batch: true
+      cross_device: true
+      cross_device_gradient: detached_remote
+      explicit_hard_negatives: 4
+    false_negative_mask:
+      enabled: true
+      metadata_rules: true
+      similarity_margin: 0.05
+  - name: matryoshka
+    type: matryoshka
+    weight: 1.0
+    dimensions:
+      512: 0.10
+      1024: 0.25
+      2048: 0.30
+      4096: 0.35
+
+runtime:
+  precision: bf16
+  attention: flash_attention_2
+  gradient_checkpointing: true
+  padding_free: true
+  train_batch_size_per_device: 2
+  gradient_accumulation_steps: 1
+  distributed:
+    strategy: deepspeed_zero2
+  optimizer:
+    type: adamw
+    weight_decay: 0.01
+  scheduler:
+    type: cosine
+    warmup_ratio: 0.05
+  epochs: 1
+
+evaluation:
+  metrics:
+    - recall@1
+    - recall@5
+    - recall@10
+    - recall@50
+    - mrr@10
+    - ndcg@10
+  dimensions:
+    - 512
+    - 1024
+    - 2048
+    - 4096
+  slices:
+    - category_id
+    - modality_pair
+    - data_source
+    - head_tail_bucket

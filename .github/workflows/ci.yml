@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.21"
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - run: uv lock --check
+      - name: Sync the lock before building the project
+        run: |
+          uv sync --frozen --no-install-project
+          uv sync --frozen --no-build-isolation
+      - name: Verify matrix interpreter
+        env:
+          EXPECTED_PYTHON: ${{ matrix.python-version }}
+        run: |
+          actual="$(uv run --no-sync python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+          test "$actual" = "$EXPECTED_PYTHON"
+      - run: uv run --no-sync ruff format --check .
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync mypy src
+      - run: uv run --no-sync lint-imports
+      - run: uv run --no-sync vulture src/mira
+      - run: uv run --no-sync pytest -m "not smoke"
+
+  distributed:
+    name: Two-rank Gloo
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.21"
+          enable-cache: true
+          python-version: "3.12"
+      - name: Sync the lock before building the project
+        run: |
+          uv sync --frozen --no-install-project
+          uv sync --frozen --no-build-isolation
+      - run: uv run --no-sync pytest tests/distributed -m distributed --no-cov
+
+  package:
+    name: Build and isolated wheel smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.21"
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --frozen --no-install-project
+      - run: uv export --frozen --no-dev --no-emit-project --output-file /tmp/runtime.txt > /dev/null
+      - name: Build distributions with the commit timestamp
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
+          uv build --no-build-isolation
+      - run: uv venv --python 3.12 /tmp/mira-wheel-smoke
+      - name: Install the locked runtime and exact wheel
+        run: |
+          uv pip install \
+            --python /tmp/mira-wheel-smoke/bin/python \
+            --require-hashes \
+            --requirements /tmp/runtime.txt
+          uv pip install \
+            --python /tmp/mira-wheel-smoke/bin/python \
+            --no-deps \
+            dist/mira_embed-0.1.0-py3-none-any.whl
+      - run: uv pip check --python /tmp/mira-wheel-smoke/bin/python
+      - run: /tmp/mira-wheel-smoke/bin/mira --help
+      - run: /tmp/mira-wheel-smoke/bin/mira --version
+      - name: Smoke every installed command surface
+        run: |
+          set -eu
+          for command in inspect validate-data benchmark doctor mine evaluate encode export train; do
+            /tmp/mira-wheel-smoke/bin/mira "$command" --help >/dev/null
+          done
+      - run: /tmp/mira-wheel-smoke/bin/python -c "import mira; print(mira.__version__)"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: distributions
+          path: dist/*
+          if-no-files-found: error
+
+  security:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.21"
+          enable-cache: true
+          python-version: "3.12"
+      - name: Sync the lock before building the project
+        run: |
+          uv sync --frozen --no-install-project
+          uv sync --frozen --no-build-isolation
+      - name: Audit every registry pin independent of platform markers
+        run: make audit-lock
+      - run: uv export --frozen --no-dev --no-emit-project --output-file /tmp/runtime.txt > /dev/null
+      - run: uv run --no-sync pip-audit --strict --requirement /tmp/runtime.txt
+      - run: uv export --frozen --all-groups --no-emit-project --output-file /tmp/dev.txt > /dev/null
+      - run: uv run --no-sync pip-audit --strict --requirement /tmp/dev.txt
+      - run: uv export --frozen --extra faiss --no-dev --no-emit-project --output-file /tmp/faiss.txt > /dev/null
+      - run: uv run --no-sync pip-audit --strict --requirement /tmp/faiss.txt

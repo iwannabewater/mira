@@ -1,0 +1,47 @@
+name: Bug report
+description: Report reproducible incorrect behavior
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include private data, model tokens, credentials, or proprietary samples.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed behavior
+      description: Include the full error and the smallest input that reproduces it.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction command
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Paste the JSON printed by `mira doctor --config <path>` after removing local paths.
+    validations:
+      required: true
+  - type: dropdown
+    id: distributed
+    attributes:
+      label: Runtime
+      options:
+        - Single process CPU
+        - Single GPU
+        - DDP
+        - DeepSpeed
+        - Other
+    validations:
+      required: true

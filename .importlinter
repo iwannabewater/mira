@@ -1,0 +1,28 @@
+[importlinter]
+root_packages =
+    mira
+include_external_packages = True
+
+[importlinter:contract:core-is-independent]
+name = Core and domain packages do not depend on MS-SWIFT
+type = forbidden
+source_modules =
+    mira.core
+    mira.data
+    mira.objectives
+    mira.mining
+    mira.evaluation
+forbidden_modules =
+    swift
+
+[importlinter:contract:integration-direction]
+name = Core does not depend on integrations
+type = forbidden
+source_modules =
+    mira.core
+    mira.data
+    mira.objectives
+    mira.evaluation
+    mira.training
+forbidden_modules =
+    mira.integrations
