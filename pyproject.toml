@@ -56,7 +56,7 @@ dev = [
   "hatchling==1.31.0",
   "hypothesis>=6.135,<7",
   "import-linter>=2.3,<3",
-  "mypy>=1.17,<2",
+  "mypy>=1.17,<3",
   "pip-audit>=2.9,<3",
   "pre-commit>=4.2,<5",
   "pytest>=9.0.3,<10",
