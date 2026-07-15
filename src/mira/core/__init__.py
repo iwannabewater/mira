@@ -15,6 +15,7 @@ from mira.core.contracts import (
     RepresentationRequest,
     RepresentationType,
 )
+from mira.core.encoded import EncodedCollection
 from mira.core.exceptions import (
     CapabilityError,
     CheckpointError,
@@ -93,6 +94,7 @@ __all__ = [
     "EmbeddingBatch",
     "EmbeddingOutput",
     "EmbeddingRecord",
+    "EncodedCollection",
     "ExportError",
     "ExportManifest",
     "GroupLayout",

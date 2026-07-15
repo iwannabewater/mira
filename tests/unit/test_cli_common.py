@@ -27,7 +27,7 @@ from mira.integrations.ms_swift.template_bridge import template_fingerprint
 from mira.mining import EncodedCollection
 
 _ROOT = Path(__file__).parents[2]
-_CONFIG = _ROOT / "configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml"
+_CONFIG = _ROOT / "configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml"
 
 
 def _provenance(checkpoint: Path, dimension: int = 2) -> dict[str, str]:

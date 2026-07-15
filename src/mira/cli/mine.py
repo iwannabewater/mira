@@ -12,8 +12,9 @@ import typer
 
 from mira.cli._common import (
     emit_json,
-    file_sha256,
+    encoded_template_checksum,
     load_encoded_collection,
+    model_source_checksum,
     require_matching_encoded_provenance,
     validate_encoded_provenance,
     write_new_artifacts,
@@ -21,8 +22,6 @@ from mira.cli._common import (
 from mira.config import resolve_config
 from mira.core.exceptions import ContractError
 from mira.core.serialization import strict_json_loads
-from mira.integrations.ms_swift.arguments import SwiftTemplateSpec
-from mira.integrations.ms_swift.template_bridge import template_fingerprint
 from mira.mining import (
     MetadataFalseNegativeFilter,
     MiningPipeline,
@@ -38,27 +37,43 @@ def mine_command(  # noqa: PLR0913 - explicit artifact paths are the CLI contrac
     positives: Annotated[Path, typer.Option("--positives", exists=True, readable=True)],
     output: Annotated[Path, typer.Option("--output")],
     manifest: Annotated[Path, typer.Option("--manifest")],
-    model_checkpoint: Annotated[
-        Path,
-        typer.Option("--model-checkpoint", exists=True, readable=True),
-    ],
+    model_checkpoint: Annotated[str, typer.Option("--model-checkpoint")],
     top_k: Annotated[int, typer.Option("--top-k", min=1)] = 8,
     retrieve_k: Annotated[int, typer.Option("--retrieve-k", min=1)] = 100,
     metadata_key: Annotated[list[str] | None, typer.Option("--metadata-key")] = None,
     similarity_alpha: Annotated[float | None, typer.Option("--similarity-alpha")] = None,
     seed: Annotated[int, typer.Option(min=0)] = 42,
     run_id: Annotated[str | None, typer.Option("--run-id")] = None,
+    expected_queries_manifest_sha256: Annotated[
+        str | None,
+        typer.Option("--expected-queries-manifest-sha256"),
+    ] = None,
+    expected_corpus_manifest_sha256: Annotated[
+        str | None,
+        typer.Option("--expected-corpus-manifest-sha256"),
+    ] = None,
 ) -> None:
     """Retrieve, filter, stratify, and write versioned hard negatives."""
     resolved = resolve_config(config)
-    query_collection = load_encoded_collection(queries)
-    corpus_collection = load_encoded_collection(corpus)
+    query_collection = load_encoded_collection(
+        queries,
+        expected_manifest_sha256=expected_queries_manifest_sha256,
+        expected_role="query",
+    )
+    corpus_collection = load_encoded_collection(
+        corpus,
+        expected_manifest_sha256=expected_corpus_manifest_sha256,
+        expected_role="document",
+    )
     require_matching_encoded_provenance(query_collection, corpus_collection)
-    instruction_template_checksum = template_fingerprint(SwiftTemplateSpec())
+    instruction_template_checksum = encoded_template_checksum(
+        query_collection,
+        resolved.config,
+    )
     for collection in (query_collection, corpus_collection):
         validate_encoded_provenance(
             collection,
-            str(model_checkpoint),
+            model_checkpoint,
             resolved.config,
             config_checksum=resolved.checksum,
             template_checksum=instruction_template_checksum,
@@ -82,8 +97,11 @@ def mine_command(  # noqa: PLR0913 - explicit artifact paths are the CLI contrac
             manifest_values={
                 "adapter_checksum": None,
                 "instruction_template_checksum": instruction_template_checksum,
-                "model_checksum": file_sha256(model_checkpoint),
-                "model_path": str(model_checkpoint.resolve()),
+                "model_checksum": model_source_checksum(
+                    model_checkpoint,
+                    resolved.config,
+                ),
+                "model_path": model_checkpoint,
                 "normalization_rule": "l2_normalized_inner_product",
                 "random_seed": seed,
                 "run_id": run_id or f"mine-{uuid.uuid4().hex}",

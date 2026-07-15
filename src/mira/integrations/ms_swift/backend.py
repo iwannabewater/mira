@@ -17,7 +17,7 @@ from mira.integrations.ms_swift.compatibility import require_compatible
 from mira.integrations.ms_swift.peft_bridge import apply_lora
 from mira.integrations.ms_swift.template_bridge import SwiftTemplateBridge
 from mira.integrations.ms_swift.trainer_bridge import create_swift_trainer
-from mira.models.adapters import Qwen3VLEmbeddingAdapter, QwenEmbeddingSemantics
+from mira.models.adapters import Qwen3VLEmbeddingAdapter, Qwen3VLEmbeddingSemantics
 from mira.training import CheckpointManager
 
 _IMAGE_LIMIT_ENVIRONMENT_NAME = "IMAGE_MAX_TOKEN_NUM"
@@ -172,7 +172,7 @@ def load_qwen3_vl_embedding(
     *,
     model_source: str | None = None,
 ) -> SwiftBackendAssets:
-    """Load a Qwen embedding model with an explicit embedding task type."""
+    """Load Qwen3-VL-Embedding with an explicit embedding task type."""
     source = (
         load_spec.model_id if model_source is None else _validated_local_model_source(model_source)
     )
@@ -203,18 +203,18 @@ def load_qwen3_vl_embedding(
             else:
                 os.environ[_IMAGE_LIMIT_ENVIRONMENT_NAME] = previous_image_tokens
     if not load_spec.load_model:
-        raise ContractError("Qwen adapter construction requires load_model=True")
+        raise ContractError("Qwen3-VL-Embedding adapter construction requires load_model=True")
     if not isinstance(model, nn.Module):
         raise ContractError("MS-SWIFT returned no torch model")
     if processor is None:
         raise ContractError("MS-SWIFT returned no processor")
     template = SwiftTemplateBridge(processor, template_spec)
-    eos_token_id = _resolve_eos_token_id(processor)
+    terminal_token_id = _resolve_terminal_token_id(processor)
     adapter = Qwen3VLEmbeddingAdapter(
         model,
-        semantics=QwenEmbeddingSemantics(
+        semantics=Qwen3VLEmbeddingSemantics(
             model_id=load_spec.model_id,
-            eos_token_id=eos_token_id,
+            terminal_token_id=terminal_token_id,
             template_fingerprint=template.fingerprint,
             instruction=template_spec.instruction,
             embedding_dimension=load_spec.embedding_dimension,
@@ -263,12 +263,15 @@ def _torch_dtype(name: str) -> torch.dtype | None:
         raise ContractError(f"unsupported torch dtype: {name!r}") from error
 
 
-def _resolve_eos_token_id(processor: Any) -> int:
+def _resolve_terminal_token_id(processor: Any) -> int:
     tokenizer = getattr(processor, "tokenizer", processor)
-    eos_token_id = getattr(tokenizer, "eos_token_id", None)
-    if not isinstance(eos_token_id, int) or eos_token_id < 0:
-        raise ContractError("MS-SWIFT processor has no valid eos_token_id")
-    return eos_token_id
+    convert = getattr(tokenizer, "convert_tokens_to_ids", None)
+    terminal_token_id = convert("<|endoftext|>") if callable(convert) else None
+    if type(terminal_token_id) is not int or terminal_token_id < 0:
+        raise ContractError(
+            "MS-SWIFT Qwen3-VL-Embedding processor has no valid <|endoftext|> token"
+        )
+    return terminal_token_id
 
 
 def _attention_name(name: str) -> str | None:

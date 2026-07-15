@@ -7,13 +7,13 @@ Validate configuration, records, and runtime prerequisites before allocating mod
 Run the config inspection first:
 
 ```bash
-uv run mira inspect --config configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml
+uv run mira inspect --config configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml
 ```
 
 Then validate the JSONL paths named by the config:
 
 ```bash
-uv run mira validate-data --config configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml
+uv run mira validate-data --config configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml
 ```
 
 Keep both outputs with the run metadata. A clean schema result is evidence for the files that were read at that time, not for a later file with the same path.
@@ -89,17 +89,17 @@ only as a writeability check. Preserve the expected failure report from the
 base environment:
 
 ```bash
-mkdir -p runs/doctor-qwen3-vl-2b
+mkdir -p runs/doctor-qwen3-vl-embedding-2b
 uv run mira doctor \
-  --config configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml \
-  --output-dir runs/doctor-qwen3-vl-2b \
-  > runs/doctor-qwen3-vl-2b/report.json
+  --config configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml \
+  --output-dir runs/doctor-qwen3-vl-embedding-2b \
+  > runs/doctor-qwen3-vl-embedding-2b/report.json
 ```
 
 The command exits with status 1 when a required check fails. MIRA 0.1 ships no
 MS-SWIFT extra because its compatible dependency graph is security-blocked.
 Dependency presence would not be model execution evidence in any case. CUDA,
-NCCL, DeepSpeed, FlashAttention, and Qwen model-weight paths remain `NOT RUN`
+NCCL, DeepSpeed, FlashAttention, and Qwen3-VL-Embedding model-weight paths remain `NOT RUN`
 until their own smoke logs and manifests exist.
 
 ## Failure policy

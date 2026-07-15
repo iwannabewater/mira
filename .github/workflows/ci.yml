@@ -71,6 +71,28 @@ jobs:
           uv sync --frozen --no-build-isolation
       - run: uv run --no-sync pytest tests/distributed -m distributed --no-cov
 
+  inference:
+    name: Qwen3-VL-Embedding inference dependencies
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.21"
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install the audited inference tuple
+        run: |
+          uv sync --frozen --no-install-project --extra inference-qwen3-vl-embedding
+          uv sync --frozen --no-build-isolation --extra inference-qwen3-vl-embedding
+      - name: Verify imports and exact compatibility ranges
+        run: |
+          uv run --no-sync python -c "from transformers import AutoProcessor, Qwen3VLModel; from mira.integrations.qwen3_vl_embedding import require_compatible; assert require_compatible().compatible"
+      - run: uv run --no-sync pytest tests/unit/test_qwen3_vl_embedding_inference.py tests/unit/test_inference_factory.py --no-cov
+
   package:
     name: Build and isolated wheel smoke
     runs-on: ubuntu-24.04
@@ -97,19 +119,27 @@ jobs:
             --python /tmp/mira-wheel-smoke/bin/python \
             --require-hashes \
             --requirements /tmp/runtime.txt
+          wheel="$(find dist -name 'mira_embed-*.whl' -type f -print -quit)"
+          test -n "$wheel"
           uv pip install \
             --python /tmp/mira-wheel-smoke/bin/python \
             --no-deps \
-            dist/mira_embed-0.1.0-py3-none-any.whl
+            "$wheel"
       - run: uv pip check --python /tmp/mira-wheel-smoke/bin/python
       - run: /tmp/mira-wheel-smoke/bin/mira --help
       - run: /tmp/mira-wheel-smoke/bin/mira --version
       - name: Smoke every installed command surface
         run: |
           set -eu
-          for command in inspect validate-data benchmark doctor mine evaluate encode export train; do
+          for command in inspect init-config validate-data benchmark doctor mine evaluate encode export train migrate-encoded; do
             /tmp/mira-wheel-smoke/bin/mira "$command" --help >/dev/null
           done
+      - name: Generate and inspect an installed reference config
+        run: |
+          work="$(mktemp -d)"
+          cd "$work"
+          /tmp/mira-wheel-smoke/bin/mira init-config --output mira.yaml
+          /tmp/mira-wheel-smoke/bin/mira inspect --config mira.yaml
       - run: /tmp/mira-wheel-smoke/bin/python -c "import mira; print(mira.__version__)"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -142,3 +172,5 @@ jobs:
       - run: uv run --no-sync pip-audit --strict --requirement /tmp/dev.txt
       - run: uv export --frozen --extra faiss --no-dev --no-emit-project --output-file /tmp/faiss.txt > /dev/null
       - run: uv run --no-sync pip-audit --strict --requirement /tmp/faiss.txt
+      - run: uv export --frozen --extra inference-qwen3-vl-embedding --no-dev --no-emit-project --output-file /tmp/inference.txt > /dev/null
+      - run: uv run --no-sync pip-audit --strict --requirement /tmp/inference.txt

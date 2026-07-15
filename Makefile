@@ -1,4 +1,4 @@
-.PHONY: audit audit-lock build check format lint sync sync-faiss test typecheck
+.PHONY: audit audit-lock build check format lint sync sync-faiss sync-inference test typecheck
 
 ARTIFACT_DIR ?= dist
 
@@ -9,6 +9,10 @@ sync:
 sync-faiss:
 	uv sync --frozen --no-install-project --extra faiss
 	uv sync --frozen --no-build-isolation --extra faiss
+
+sync-inference:
+	uv sync --frozen --no-install-project --extra inference-qwen3-vl-embedding
+	uv sync --frozen --no-build-isolation --extra inference-qwen3-vl-embedding
 
 format: sync
 	uv run --no-sync ruff format .
@@ -39,6 +43,8 @@ audit: sync audit-lock
 	uv run --no-sync pip-audit --strict --requirement /tmp/mira-dev-requirements.txt
 	uv export --frozen --extra faiss --no-dev --no-emit-project --output-file /tmp/mira-faiss-requirements.txt > /dev/null
 	uv run --no-sync pip-audit --strict --requirement /tmp/mira-faiss-requirements.txt
+	uv export --frozen --extra inference-qwen3-vl-embedding --no-dev --no-emit-project --output-file /tmp/mira-inference-requirements.txt > /dev/null
+	uv run --no-sync pip-audit --strict --requirement /tmp/mira-inference-requirements.txt
 
 build: sync
 	uv build --no-build-isolation --out-dir "$(ARTIFACT_DIR)"

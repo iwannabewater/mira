@@ -59,3 +59,29 @@ core contracts, objective results, observability records, and training-step
 mutation ordering. Keep its assertions behavioral and paired with the source
 contract they protect. Changes require `uv run pytest
 tests/unit/test_runtime_contract_coverage.py` followed by `make check`.
+
+The MS-SWIFT boundary suite in `tests/unit/test_ms_swift_boundary.py` owns the
+optional-integration isolation contract. Preserve lazy imports, exact audited
+version checks, one-time model construction, full Qwen3-VL-Embedding naming on
+public surfaces, and the upstream-only `qwen3_vl_emb` implementation identifier.
+Changes to the MS-SWIFT adapter or this suite require `uv run pytest
+tests/unit/test_ms_swift_boundary.py` followed by `make check`.
+
+The CLI model lifecycle suite in
+`tests/integration/test_cli_model_lifecycle.py` owns command-level preflight,
+model-source trust, checkpoint/export separation, and encode artifact
+publication. Preserve fail-before-load validation, immutable remote model
+identity, descriptor-bound local reads, and atomic output behavior. Changes to
+model lifecycle commands or this suite require `uv run pytest
+tests/integration/test_cli_model_lifecycle.py` followed by `make check` and an
+isolated wheel-install smoke test.
+
+The encoded artifact protocol in `src/mira/inference/artifacts.py` and
+`tests/unit/test_inference_artifacts.py` is a security-sensitive I/O hotspot.
+Preserve the v2 manifest schema, descriptor-bound no-symlink reads, exact file
+set and checksum verification, bounded snapshots, global item-ID and role
+semantics, normalization checks, one-shard reader memory bound, full shard
+validation before budgeted materialization, and atomic no-replace publication.
+Changes require `uv run pytest
+tests/unit/test_inference_artifacts.py tests/integration/test_cli_workflows.py`
+followed by `make check` and an isolated wheel-install smoke test.

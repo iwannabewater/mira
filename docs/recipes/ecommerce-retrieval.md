@@ -4,14 +4,14 @@ Status: config and data semantics implemented; Phase-1 CLI execution
 unsupported; MS-SWIFT dependency installation security-blocked; 8B accelerator
 run `NOT RUN`.
 
-The reference experiment trains a global Qwen3-VL embedding for product retrieval across image, OCR, mixed-modal, and text replay data. It is an auditable target config, not a measured production preset.
+The reference experiment trains a Qwen3-VL-Embedding global representation for product retrieval across image, OCR, mixed-modal, and text replay data. It is an auditable target config, not a measured production preset.
 
 ## Reference config
 
 Use:
 
 ```text
-configs/experiments/qwen3_vl_ecommerce.yaml
+configs/experiments/qwen3_vl_embedding_ecommerce.yaml
 ```
 
 Its declared dataset mixture is:
@@ -47,16 +47,16 @@ Do not populate a stronger identity from a weak heuristic. A wrong canonical ID 
 
 ```bash
 uv run mira inspect \
-  --config configs/experiments/qwen3_vl_ecommerce.yaml
+  --config configs/experiments/qwen3_vl_embedding_ecommerce.yaml
 
 uv run mira validate-data \
-  --config configs/experiments/qwen3_vl_ecommerce.yaml
+  --config configs/experiments/qwen3_vl_embedding_ecommerce.yaml
 
-mkdir -p runs/doctor-qwen3-vl-ecommerce
+mkdir -p runs/doctor-qwen3-vl-embedding-ecommerce
 uv run mira doctor \
-  --config configs/experiments/qwen3_vl_ecommerce.yaml \
-  --output-dir runs/doctor-qwen3-vl-ecommerce \
-  > runs/doctor-qwen3-vl-ecommerce/report.json
+  --config configs/experiments/qwen3_vl_embedding_ecommerce.yaml \
+  --output-dir runs/doctor-qwen3-vl-embedding-ecommerce \
+  > runs/doctor-qwen3-vl-embedding-ecommerce/report.json
 ```
 
 `mira doctor` writes JSON to standard output. `--output-dir` checks
@@ -84,10 +84,10 @@ declares all of these unsupported combinations:
 - a weighted four-source mixture
 - similarity-margin false-negative masking
 
-Do not present `mira train --config configs/experiments/qwen3_vl_ecommerce.yaml`
+Do not present `mira train --config configs/experiments/qwen3_vl_embedding_ecommerce.yaml`
 as an executable smoke command. A future launcher must implement and verify each
 declared capability. It must also use an MS-SWIFT dependency graph that passes
-security review and record the Qwen, DeepSpeed, CUDA, NCCL, and FlashAttention
+security review and record the Qwen3-VL-Embedding, DeepSpeed, CUDA, NCCL, and FlashAttention
 tuple. A reduced config should be a separate file with a separate checksum, not
 an unrecorded runtime override.
 
@@ -101,8 +101,8 @@ When a verified checkpoint exists, run:
 
 ```bash
 uv run mira evaluate \
-  --checkpoint runs/qwen3-vl-ecommerce-smoke \
-  --config configs/experiments/qwen3_vl_ecommerce.yaml \
+  --checkpoint runs/qwen3-vl-embedding-ecommerce-smoke \
+  --config configs/experiments/qwen3_vl_embedding_ecommerce.yaml \
   --queries artifacts/ecommerce-validation-queries.pt \
   --candidates artifacts/ecommerce-validation-candidates.pt \
   --relevance artifacts/ecommerce-validation-relevance.pt \

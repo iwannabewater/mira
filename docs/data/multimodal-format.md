@@ -74,10 +74,10 @@ text such as `NULL`.
 
 ## Model capability boundary
 
-The general schema includes image, video, and audio so adapters can declare their own capabilities. The audited Qwen3-VL-Embedding adapter declares text, image, video, and mixed-modal global embeddings. It does not declare audio support. Audio records are outside the current Qwen recipe and orchestration must reject them before model loading.
+The general schema includes image, video, and audio so adapters can declare their own capabilities. The audited Qwen3-VL-Embedding adapter declares text, image, video, and mixed-modal global embeddings. It does not declare audio support. Audio records are outside the current Qwen3-VL-Embedding recipe and orchestration must reject them before model loading.
 
 ## Instructions
 
-An item may carry an `instruction`, but training and inference must use the same prompt semantics. The Qwen bridge defaults to `Represent the user's input.` and fingerprints every prompt-affecting template setting. A batch whose instruction or template fingerprint differs from the loaded adapter is rejected.
+An item may carry an `instruction`, but training and inference must use the same prompt semantics. The Qwen3-VL-Embedding bridge defaults to `Represent the user's input.` and fingerprints every prompt-affecting template setting. A batch whose instruction or template fingerprint differs from the loaded adapter is rejected.
 
 Do not use item instructions as untracked free-form metadata. If instructions vary by task, version the policy and record it with the dataset and export manifests.

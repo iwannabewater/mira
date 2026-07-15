@@ -1,8 +1,8 @@
 """Qwen3-VL-Embedding representation adapter.
 
-The adapter preserves the official EOS pooling and L2-normalization behavior.
-MS-SWIFT is responsible only for model and template construction; tensor
-semantics remain owned by MIRA.
+The adapter preserves official last-token pooling and L2-normalization behavior.
+Direct Transformers inference and the optional MS-SWIFT training integration
+share this tensor contract; model construction stays at their integration boundaries.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from mira.models.base import (
     TuningSpec,
 )
 from mira.models.pooling import last_token_pool, normalize_embeddings, truncate_and_normalize
-from mira.models.qwen_audit import AUDITED_QWEN_TARGETS
+from mira.models.qwen3_vl_embedding_audit import AUDITED_QWEN3_VL_EMBEDDING_TARGETS
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,42 +52,61 @@ _COMPONENT_MARKERS: dict[str, tuple[str, ...]] = {
 
 
 @dataclass(frozen=True, slots=True)
-class QwenEmbeddingSemantics:
-    """Immutable Qwen prompt, EOS, and embedding-dimension semantics."""
+class Qwen3VLEmbeddingSemantics:
+    """Immutable Qwen3-VL-Embedding prompt and representation semantics."""
 
     model_id: str
-    eos_token_id: int
+    terminal_token_id: int | None
     template_fingerprint: str
     instruction: str = "Represent the user's input."
     embedding_dimension: int | None = None
 
 
 class Qwen3VLEmbeddingAdapter(nn.Module):
-    """Adapt a loaded Qwen3-VL embedding model to MIRA contracts."""
+    """Adapt a loaded Qwen3-VL-Embedding model to MIRA contracts."""
 
     DEFAULT_INSTRUCTION: ClassVar[str] = "Represent the user's input."
     SUPPORTED_MODEL_DIMENSIONS: ClassVar[Mapping[str, int]] = MappingProxyType(
-        {model_id: target.embedding_dimension for model_id, target in AUDITED_QWEN_TARGETS.items()}
+        {
+            model_id: target.embedding_dimension
+            for model_id, target in AUDITED_QWEN3_VL_EMBEDDING_TARGETS.items()
+        }
     )
 
     def __init__(
         self,
         model: nn.Module,
         *,
-        semantics: QwenEmbeddingSemantics,
+        semantics: Qwen3VLEmbeddingSemantics,
     ) -> None:
         """Bind a model to immutable prompt and representation semantics."""
         super().__init__()
-        if not semantics.model_id.strip():
-            raise ContractError("Qwen adapter model_id must not be empty")
-        if semantics.eos_token_id < 0:
-            raise ContractError("Qwen adapter eos_token_id must be non-negative")
-        if not semantics.template_fingerprint.strip():
-            raise ContractError("Qwen adapter template fingerprint must not be empty")
-        if not semantics.instruction.strip():
-            raise ContractError("Qwen adapter instruction must not be empty")
+        if (
+            type(semantics.model_id) is not str
+            or not semantics.model_id
+            or semantics.model_id != semantics.model_id.strip()
+        ):
+            raise ContractError("Qwen3-VL-Embedding adapter model_id must not be empty")
+        if semantics.terminal_token_id is not None and (
+            type(semantics.terminal_token_id) is not int or semantics.terminal_token_id < 0
+        ):
+            raise ContractError("Qwen3-VL-Embedding terminal_token_id must be null or non-negative")
+        if (
+            type(semantics.template_fingerprint) is not str
+            or not semantics.template_fingerprint
+            or semantics.template_fingerprint != semantics.template_fingerprint.strip()
+        ):
+            raise ContractError("Qwen3-VL-Embedding adapter template fingerprint must not be empty")
+        if (
+            type(semantics.instruction) is not str
+            or not semantics.instruction
+            or semantics.instruction != semantics.instruction.strip()
+        ):
+            raise ContractError("Qwen3-VL-Embedding adapter instruction must not be empty")
         if not _is_valid_embedding_dimension(semantics.embedding_dimension):
-            raise ContractError("Qwen adapter embedding_dimension must be a positive integer")
+            raise ContractError(
+                "Qwen3-VL-Embedding adapter embedding_dimension must be a positive integer"
+            )
         known_dimension = self.SUPPORTED_MODEL_DIMENSIONS.get(semantics.model_id)
         resolved_dimension = (
             known_dimension
@@ -96,7 +115,8 @@ class Qwen3VLEmbeddingAdapter(nn.Module):
         )
         if resolved_dimension is None:
             raise ContractError(
-                "embedding_dimension is required for an unrecognized Qwen model identifier"
+                "embedding_dimension is required for an unrecognized "
+                "Qwen3-VL-Embedding model identifier"
             )
         if known_dimension is not None and resolved_dimension != known_dimension:
             raise ContractError(
@@ -105,7 +125,7 @@ class Qwen3VLEmbeddingAdapter(nn.Module):
             )
         self.model = model
         self.model_id = semantics.model_id
-        self.eos_token_id = semantics.eos_token_id
+        self.terminal_token_id = semantics.terminal_token_id
         self.template_fingerprint = semantics.template_fingerprint
         self.instruction = semantics.instruction
         self.embedding_dimension = resolved_dimension
@@ -155,43 +175,50 @@ class Qwen3VLEmbeddingAdapter(nn.Module):
         _validate_token_inputs(batch.model_inputs)
         return dict(batch.model_inputs)
 
-    def forward_representations(
+    def forward_representations(  # noqa: PLR0912 - explicit optional output contracts
         self,
         inputs: Mapping[str, Any],
         request: RepresentationRequest,
     ) -> EmbeddingOutput:
-        """Run Qwen and extract the official last-EOS representation."""
+        """Run Qwen3-VL-Embedding and extract its official last-token representation."""
         if request.representation is not RepresentationType.GLOBAL:
             raise CapabilityError(
-                "Qwen3-VL token and hybrid representations are not stable in MIRA 0.1"
+                "Qwen3-VL-Embedding token and hybrid representations are not stable"
             )
         self.capabilities.require(
             Capability.GLOBAL_EMBEDDING,
-            context="Qwen representation request",
+            context="Qwen3-VL-Embedding representation request",
         )
         _validate_token_inputs(inputs)
         input_ids = cast("Tensor", inputs["input_ids"])
         attention_mask = cast("Tensor", inputs["attention_mask"])
-        _validate_eos(input_ids, attention_mask, self.eos_token_id)
+        if self.terminal_token_id is not None:
+            _validate_terminal_token(input_ids, attention_mask, self.terminal_token_id)
 
         model_inputs = {name: value for name, value in inputs.items() if name != "labels"}
+        needs_hidden_states = bool(request.hidden_layers)
         outputs = self.model(
             **model_inputs,
-            output_hidden_states=True,
+            output_hidden_states=needs_hidden_states,
             return_dict=True,
             use_cache=False,
         )
-        hidden_states = _extract_hidden_states(outputs)
-        final_hidden = hidden_states[-1]
+        hidden_states = _extract_hidden_states(outputs) if needs_hidden_states else None
+        final_hidden = _extract_last_hidden_state(outputs)
+        if final_hidden is None:
+            hidden_states = _extract_hidden_states(outputs)
+            final_hidden = hidden_states[-1]
         embeddings = last_token_pool(final_hidden, attention_mask)
         if embeddings.shape[1] != self.embedding_dimension:
             raise InvalidEmbeddingError(
-                f"Qwen output dimension {embeddings.shape[1]} does not match declared "
+                f"Qwen3-VL-Embedding output dimension {embeddings.shape[1]} does not match "
+                "declared "
                 f"dimension {self.embedding_dimension}"
             )
         if request.dimension is not None and request.dimension > self.embedding_dimension:
             raise InvalidEmbeddingError(
-                f"requested embedding dimension {request.dimension} exceeds Qwen output "
+                f"requested embedding dimension {request.dimension} exceeds "
+                "Qwen3-VL-Embedding output "
                 f"dimension {self.embedding_dimension}"
             )
         if request.dimension is not None:
@@ -205,6 +232,10 @@ class Qwen3VLEmbeddingAdapter(nn.Module):
 
         requested_layers: dict[int, Tensor] | None = None
         if request.hidden_layers:
+            if hidden_states is None:
+                raise InvalidEmbeddingError(
+                    "Qwen3-VL-Embedding model omitted requested hidden states"
+                )
             requested_layers = {}
             for layer in request.hidden_layers:
                 try:
@@ -228,7 +259,7 @@ class Qwen3VLEmbeddingAdapter(nn.Module):
             auxiliary={
                 "instruction": self.instruction,
                 "model_id": self.model_id,
-                "pooling": "last_eos",
+                "pooling": "last_token",
                 "template_fingerprint": self.template_fingerprint,
             },
         )
@@ -280,14 +311,16 @@ class Qwen3VLEmbeddingAdapter(nn.Module):
         destination.mkdir(parents=True, exist_ok=True)
         save_pretrained = getattr(self.model, "save_pretrained", None)
         if not callable(save_pretrained):
-            raise CapabilityError("the loaded Qwen model does not expose save_pretrained")
+            raise CapabilityError(
+                "the loaded Qwen3-VL-Embedding model does not expose save_pretrained"
+            )
         save_pretrained(destination, safe_serialization=export_config.safe_serialization)
         files = tuple(sorted(path.name for path in destination.iterdir() if path.is_file()))
         if not files:
-            raise ContractError("Qwen save_pretrained produced no export files")
+            raise ContractError("Qwen3-VL-Embedding save_pretrained produced no export files")
         manifest = ExportManifest(
             model_id=self.model_id,
-            pooling="last_eos",
+            pooling="last_token",
             instruction=self.instruction,
             normalization="l2_after_optional_mrl_truncation",
             embedding_dimension=self.embedding_dimension,
@@ -307,7 +340,7 @@ class Qwen3VLEmbeddingAdapter(nn.Module):
                     "files": manifest.files,
                     "metadata": canonicalize_json_value(
                         manifest.metadata,
-                        context="Qwen export manifest metadata",
+                        context="Qwen3-VL-Embedding export manifest metadata",
                     ),
                 },
                 allow_nan=False,
@@ -323,7 +356,7 @@ class Qwen3VLEmbeddingAdapter(nn.Module):
 def _validate_token_inputs(inputs: Mapping[str, Any]) -> None:
     for key in ("input_ids", "attention_mask"):
         if key not in inputs or not isinstance(inputs[key], Tensor):
-            raise ContractError(f"Qwen inputs require tensor field {key!r}")
+            raise ContractError(f"Qwen3-VL-Embedding inputs require tensor field {key!r}")
     input_ids = cast("Tensor", inputs["input_ids"])
     attention_mask = cast("Tensor", inputs["attention_mask"])
     if input_ids.ndim != _TOKEN_MATRIX_RANK or input_ids.dtype not in {
@@ -349,21 +382,26 @@ def _is_valid_embedding_dimension(value: object) -> bool:
     return value is None or (isinstance(value, int) and not isinstance(value, bool) and value > 0)
 
 
-def _validate_eos(input_ids: Tensor, attention_mask: Tensor, eos_token_id: int) -> None:
+def _validate_terminal_token(
+    input_ids: Tensor,
+    attention_mask: Tensor,
+    terminal_token_id: int,
+) -> None:
     positions = torch.arange(attention_mask.shape[1], device=attention_mask.device)
     positions = positions.unsqueeze(0).expand_as(attention_mask)
     last_positions = torch.where(
         attention_mask.bool(), positions, torch.full_like(positions, -1)
     ).amax(dim=1)
     if bool((last_positions < 0).any().item()):
-        raise ContractError("Qwen attention mask contains an empty input row")
+        raise ContractError("Qwen3-VL-Embedding attention mask contains an empty input row")
     rows = torch.arange(input_ids.shape[0], device=input_ids.device)
     observed = input_ids[rows, last_positions]
-    invalid = observed != eos_token_id
+    invalid = observed != terminal_token_id
     if bool(invalid.any().item()):
         invalid_rows = invalid.nonzero(as_tuple=False).flatten().tolist()
         raise ContractError(
-            f"Qwen template must terminate every input with EOS token {eos_token_id}; "
+            "Qwen3-VL-Embedding template must terminate every input with token "
+            f"{terminal_token_id}; "
             f"invalid rows: {invalid_rows}"
         )
 
@@ -373,9 +411,20 @@ def _extract_hidden_states(outputs: Any) -> tuple[Tensor, ...]:
     if hidden_states is None and isinstance(outputs, Mapping):
         hidden_states = outputs.get("hidden_states")
     if not isinstance(hidden_states, (tuple, list)) or not hidden_states:
-        raise InvalidEmbeddingError("Qwen model did not return hidden states")
+        raise InvalidEmbeddingError("Qwen3-VL-Embedding model did not return hidden states")
     if not all(
         isinstance(value, Tensor) and value.ndim == _HIDDEN_STATE_RANK for value in hidden_states
     ):
-        raise InvalidEmbeddingError("Qwen hidden states must be rank-3 tensors")
+        raise InvalidEmbeddingError("Qwen3-VL-Embedding hidden states must be rank-3 tensors")
     return tuple(hidden_states)
+
+
+def _extract_last_hidden_state(outputs: Any) -> Tensor | None:
+    value = getattr(outputs, "last_hidden_state", None)
+    if value is None and isinstance(outputs, Mapping):
+        value = outputs.get("last_hidden_state")
+    if value is None:
+        return None
+    if not isinstance(value, Tensor) or value.ndim != _HIDDEN_STATE_RANK:
+        raise InvalidEmbeddingError("Qwen3-VL-Embedding last_hidden_state must be a rank-3 tensor")
+    return value

@@ -23,7 +23,7 @@ from mira.integrations.ms_swift import (
 from mira.integrations.ms_swift.arguments import SwiftLoadSpec, SwiftTemplateSpec
 from mira.integrations.ms_swift.backend import (
     _attention_name,
-    _resolve_eos_token_id,
+    _resolve_terminal_token_id,
     _torch_dtype,
     load_qwen3_vl_embedding,
 )
@@ -36,7 +36,7 @@ from mira.integrations.ms_swift.peft_bridge import LoraSpec, apply_lora
 from mira.integrations.ms_swift.template_bridge import SwiftTemplateBridge, template_fingerprint
 from mira.integrations.ms_swift.trainer_bridge import SwiftTrainerSpec, create_swift_trainer
 from mira.models.base import ExportConfig, ExportManifest
-from mira.models.qwen_audit import AUDITED_QWEN_TARGETS
+from mira.models.qwen3_vl_embedding_audit import AUDITED_QWEN3_VL_EMBEDDING_TARGETS
 from mira.training import (
     CheckpointLoadResult,
     CheckpointRestoreTargets,
@@ -64,11 +64,20 @@ class _ObservableRLock:
         self._lock.release()
 
 
+def _tokenizer(token_id: int = 9) -> SimpleNamespace:
+    return SimpleNamespace(
+        eos_token_id=token_id,
+        convert_tokens_to_ids=lambda token: (
+            token_id if token == "<|endoftext|>" else -1  # noqa: S105 - terminal token
+        ),
+    )
+
+
 def _load_spec(
     model_id: str = "Qwen/Qwen3-VL-Embedding-2B",
     **kwargs: Any,
 ) -> SwiftLoadSpec:
-    target = AUDITED_QWEN_TARGETS[model_id]
+    target = AUDITED_QWEN3_VL_EMBEDDING_TARGETS[model_id]
     return SwiftLoadSpec(
         model_id=model_id,
         revision=kwargs.pop("revision", target.revision),
@@ -314,7 +323,7 @@ def test_backend_loads_with_explicit_arguments_and_no_fallback(
     monkeypatch.delenv("IMAGE_MAX_TOKEN_NUM", raising=False)
     calls: dict[str, Any] = {}
     model = nn.Linear(2, 2)
-    processor = SimpleNamespace(tokenizer=SimpleNamespace(eos_token_id=9))
+    processor = SimpleNamespace(tokenizer=_tokenizer())
 
     def get_model_processor(model_id: str, **kwargs: Any) -> tuple[nn.Module, object]:
         calls.update(
@@ -360,7 +369,7 @@ def test_backend_restores_existing_image_token_environment(
     previous_limit = "previous"
     monkeypatch.setenv("IMAGE_MAX_TOKEN_NUM", previous_limit)
     model = nn.Linear(2, 2)
-    processor = SimpleNamespace(tokenizer=SimpleNamespace(eos_token_id=9))
+    processor = SimpleNamespace(tokenizer=_tokenizer())
     monkeypatch.setattr(backend, "require_compatible", lambda: None)
     monkeypatch.setattr(
         backend,
@@ -424,7 +433,7 @@ def test_backend_serializes_process_global_image_token_environment(
         else:
             second_entered.set()
         observed[model_id] = (entry_value, backend.os.environ.get(environment_name))
-        processor = SimpleNamespace(tokenizer=SimpleNamespace(eos_token_id=9))
+        processor = SimpleNamespace(tokenizer=_tokenizer())
         return nn.Linear(2, 2), processor
 
     monkeypatch.setattr(
@@ -503,7 +512,7 @@ def test_backend_releases_environment_lock_and_restores_value_after_failure(
         assert backend.os.environ[environment_name] == str(attempts * 128)
         if attempts == 1:
             raise RuntimeError("upstream load failed")
-        processor = SimpleNamespace(tokenizer=SimpleNamespace(eos_token_id=9))
+        processor = SimpleNamespace(tokenizer=_tokenizer())
         return nn.Linear(2, 2), processor
 
     monkeypatch.setattr(
@@ -536,8 +545,8 @@ def test_backend_helpers_and_invalid_upstream_results(monkeypatch: pytest.Monkey
         _torch_dtype("int8")
     with pytest.raises(ContractError, match="attention"):
         _attention_name("magic")
-    with pytest.raises(ContractError, match="eos_token_id"):
-        _resolve_eos_token_id(SimpleNamespace(eos_token_id=-1))
+    with pytest.raises(ContractError, match="endoftext"):
+        _resolve_terminal_token_id(SimpleNamespace())
 
     monkeypatch.setattr(backend, "require_compatible", lambda: None)
     monkeypatch.setattr(backend, "import_module", lambda _name: SimpleNamespace())
@@ -584,7 +593,7 @@ def test_peft_bridge_validates_topology_and_wraps_model(
             captured.update(kwargs)
 
     monkeypatch.setattr(
-        "mira.integrations.ms_swift.peft_bridge.import_module",
+        "mira.integrations.peft.import_module",
         lambda _name: SimpleNamespace(
             LoraConfig=FakeLoraConfig,
             get_peft_model=lambda value, _config: value,
@@ -628,7 +637,7 @@ def test_peft_bridge_rejects_missing_targets_or_invalid_api(
     with pytest.raises(ContractError, match="absent"):
         apply_lora(model, LoraSpec(1, 1.0, 0.0, ("k_proj",)))
     monkeypatch.setattr(
-        "mira.integrations.ms_swift.peft_bridge.import_module",
+        "mira.integrations.peft.import_module",
         lambda _name: SimpleNamespace(),
     )
     with pytest.raises(ContractError, match="construction API"):

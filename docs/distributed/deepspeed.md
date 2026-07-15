@@ -2,7 +2,7 @@
 
 Status: experimental and `NOT RUN`.
 
-MIRA schema version 1 recognizes `deepspeed_zero2` and `deepspeed_zero3` so experiment intent can be validated and recorded. The current release does not declare a DeepSpeed dependency, publish a supported launcher command, or claim that sharded Qwen training and resume work.
+MIRA schema version 1 recognizes `deepspeed_zero2` and `deepspeed_zero3` so experiment intent can be validated and recorded. The current release does not declare a DeepSpeed dependency, publish a supported launcher command, or claim that sharded Qwen3-VL-Embedding training and resume work.
 
 ## Configuration surface
 

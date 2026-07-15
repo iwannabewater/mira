@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import torch
@@ -14,12 +15,16 @@ from mira.cli.app import app
 from mira.cli.mine import _load_positive_mapping
 from mira.config import resolve_config
 from mira.core.exceptions import ChecksumMismatchError, ContractError
+from mira.inference import load_encoded_artifact, write_encoded_artifact
 from mira.integrations.ms_swift import SwiftTemplateSpec
 from mira.integrations.ms_swift.template_bridge import template_fingerprint
 from mira.mining import EncodedCollection, MiningManifest
 
+if TYPE_CHECKING:
+    from typing import Literal
+
 _ROOT = Path(__file__).parents[2]
-_CONFIG = _ROOT / "configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml"
+_CONFIG = _ROOT / "configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml"
 
 
 def _save_collection(
@@ -27,8 +32,11 @@ def _save_collection(
     item_ids: list[str],
     embeddings: torch.Tensor,
     checkpoint: Path,
+    *,
+    role: Literal["query", "document"],
 ) -> EncodedCollection:
     resolved = resolve_config(_CONFIG)
+    embeddings = torch.nn.functional.normalize(embeddings, dim=1)
     collection = EncodedCollection(
         tuple(item_ids),
         embeddings,
@@ -41,7 +49,12 @@ def _save_collection(
             template_checksum=template_fingerprint(SwiftTemplateSpec()),
         ),
     )
-    save_encoded_collection(collection, path)
+    write_encoded_artifact(
+        collection,
+        path,
+        role=role,
+        normalized=True,
+    )
     return collection
 
 
@@ -75,9 +88,11 @@ def test_cli_lists_every_required_command_and_inspects_config() -> None:
     assert help_result.exit_code == 0
     for name in (
         "inspect",
+        "init-config",
         "validate-data",
         "train",
         "mine",
+        "migrate-encoded",
         "evaluate",
         "encode",
         "export",
@@ -91,6 +106,106 @@ def test_cli_lists_every_required_command_and_inspects_config() -> None:
     payload = json.loads(result.stdout)
     assert payload["status"] == "valid"
     assert payload["model"] == "Qwen/Qwen3-VL-Embedding-2B"
+
+
+@pytest.mark.parametrize(
+    ("preset", "source_name", "model_id"),
+    [
+        (
+            "qwen3-vl-embedding-2b-single-gpu-lora",
+            "qwen3_vl_embedding_2b_single_gpu_lora.yaml",
+            "Qwen/Qwen3-VL-Embedding-2B",
+        ),
+        (
+            "qwen3-vl-embedding-8b-ecommerce",
+            "qwen3_vl_embedding_ecommerce.yaml",
+            "Qwen/Qwen3-VL-Embedding-8B",
+        ),
+    ],
+)
+def test_cli_init_config_publishes_exact_reference_without_replacement(
+    tmp_path: Path,
+    preset: str,
+    source_name: str,
+    model_id: str,
+) -> None:
+    runner = CliRunner()
+    output = tmp_path / "nested" / "mira.yaml"
+    result = runner.invoke(
+        app,
+        ["init-config", "--preset", preset, "--output", str(output)],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "created"
+    assert payload["preset"] == preset
+    assert output.read_bytes() == (_ROOT / "configs" / "experiments" / source_name).read_bytes()
+    assert resolve_config(output).config.model.name_or_path == model_id
+
+    repeated = runner.invoke(
+        app,
+        ["init-config", "--preset", preset, "--output", str(output)],
+    )
+    assert repeated.exit_code != 0
+    assert isinstance(repeated.exception, ContractError)
+    assert "already exists" in str(repeated.exception)
+
+
+def test_cli_migrates_legacy_encoded_bundle_with_explicit_semantics(tmp_path: Path) -> None:
+    runner = CliRunner()
+    legacy = tmp_path / "legacy.pt"
+    collection = EncodedCollection(
+        ("one", "two"),
+        torch.nn.functional.normalize(torch.tensor([[1.0, 2.0], [3.0, 4.0]]), dim=1),
+        ({"source": "legacy"}, {"source": "legacy"}),
+        {"normalization_rule": "l2_normalized_inner_product", "schema": "mira.encoded.v1"},
+    )
+    save_encoded_collection(collection, legacy)
+    output = tmp_path / "migrated"
+    result = runner.invoke(
+        app,
+        [
+            "migrate-encoded",
+            "--input",
+            str(legacy),
+            "--output",
+            str(output),
+            "--role",
+            "query",
+            "--normalization",
+            "normalized",
+            "--shard-size",
+            "1",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["role"] == "query"
+    assert payload["shards"] == 2
+    migrated = load_encoded_artifact(
+        output,
+        expected_manifest_sha256=payload["manifest_sha256"],
+        expected_role="query",
+    )
+    assert migrated.checksum() == collection.checksum()
+
+    incompatible = runner.invoke(
+        app,
+        [
+            "migrate-encoded",
+            "--input",
+            str(legacy),
+            "--output",
+            str(tmp_path / "invalid"),
+            "--role",
+            "query",
+            "--normalization",
+            "unnormalized",
+        ],
+    )
+    assert incompatible.exit_code != 0
+    assert isinstance(incompatible.exception, ContractError)
+    assert "claims L2-normalized" in str(incompatible.exception)
 
 
 @pytest.mark.parametrize(
@@ -129,12 +244,19 @@ def test_cli_mine_and_evaluate_encoded_bundles(tmp_path: Path) -> None:
     candidate_embeddings[0, 0] = 1.0
     candidate_embeddings[1, :2] = torch.tensor([0.8, 0.6])
     candidate_embeddings[2:, 1] = 1.0
-    query_collection = _save_collection(queries, ["q"], query_embeddings, checkpoint)
+    query_collection = _save_collection(
+        queries,
+        ["q"],
+        query_embeddings,
+        checkpoint,
+        role="query",
+    )
     candidate_collection = _save_collection(
         candidates,
         ["positive", "hard", "easy", *(f"filler-{index}" for index in range(9))],
         candidate_embeddings,
         checkpoint,
+        role="document",
     )
     positives = tmp_path / "positives.json"
     positives.write_text(json.dumps({"q": ["positive"]}))
@@ -252,12 +374,19 @@ def test_cli_mine_rolls_back_both_artifacts_when_prepared_artifact_fails(
     checkpoint.write_bytes(b"reference-checkpoint")
     queries = tmp_path / "queries.pt"
     candidates = tmp_path / "candidates.pt"
-    _save_collection(queries, ["q"], torch.tensor([[1.0, 0.0]]), checkpoint)
+    _save_collection(
+        queries,
+        ["q"],
+        torch.tensor([[1.0, 0.0]]),
+        checkpoint,
+        role="query",
+    )
     _save_collection(
         candidates,
         ["positive", "hard", "easy"],
         torch.tensor([[1.0, 0.0], [0.8, 0.2], [0.0, 1.0]]),
         checkpoint,
+        role="document",
     )
     positives = tmp_path / "positives.json"
     positives.write_text(json.dumps({"q": ["positive"]}))

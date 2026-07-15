@@ -9,7 +9,9 @@ from mira.cli.doctor import doctor_command
 from mira.cli.encode import encode_command
 from mira.cli.evaluate import evaluate_command
 from mira.cli.export import export_command
+from mira.cli.init_config import init_config_command
 from mira.cli.inspect import inspect_command
+from mira.cli.migrate_encoded import migrate_encoded_command
 from mira.cli.mine import mine_command
 from mira.cli.train import train_command
 from mira.cli.validate_data import validate_data_command
@@ -44,10 +46,12 @@ def main(
 
 
 app.command("inspect")(inspect_command)
+app.command("init-config")(init_config_command)
 app.command("validate-data")(validate_data_command)
 app.command("benchmark")(benchmark_command)
 app.command("doctor")(doctor_command)
 app.command("mine")(mine_command)
+app.command("migrate-encoded")(migrate_encoded_command)
 app.command("evaluate")(evaluate_command)
 app.command("encode")(encode_command)
 app.command("export")(export_command)

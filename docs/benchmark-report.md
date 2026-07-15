@@ -28,7 +28,7 @@ These values describe the snapshot host only. They are not a supported accelerat
 | --- | --- | --- | --- |
 | Two-rank distributed reference | `uv run pytest --no-cov -m distributed` | `PASS` | CPU/Gloo variable-row gather, gradient modes, global-query loss scaling, and mismatch rejection |
 
-The distributed test launches two local workers. It does not measure throughput and does not exercise a Qwen model, CUDA, NCCL, multi-node networking, DeepSpeed, or FlashAttention.
+The distributed test launches two local workers. It does not measure throughput and does not exercise a Qwen3-VL-Embedding model, CUDA, NCCL, multi-node networking, DeepSpeed, or FlashAttention.
 
 ## Performance lanes
 
@@ -69,7 +69,7 @@ it only as a local diagnostic:
 
 ```bash
 uv run mira benchmark \
-  --config configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml \
+  --config configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml \
   --queries 64 \
   --candidates 512 \
   --output artifacts/benchmark-diagnostic.json

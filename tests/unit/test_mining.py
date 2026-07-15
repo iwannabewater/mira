@@ -139,6 +139,53 @@ def test_tied_scores_preserve_corpus_order_for_rows_strata_and_checksum(
     assert with_unstable_topk.manifest.mined_rows_checksum == baseline.manifest.mined_rows_checksum
 
 
+def test_chunked_exact_mining_matches_dense_reference_across_block_boundaries() -> None:
+    generator = torch.Generator().manual_seed(19)
+    query_values = torch.randn(7, 8, generator=generator)
+    corpus_values = torch.randn(31, 8, generator=generator)
+    queries = EncodedCollection(
+        tuple(f"q{index}" for index in range(7)),
+        query_values,
+        tuple({} for _ in range(7)),
+    )
+    corpus = EncodedCollection(
+        tuple(f"c{index}" for index in range(31)),
+        corpus_values,
+        tuple({} for _ in range(31)),
+    )
+    positives = dict.fromkeys(queries.item_ids, ("c0",))
+    request = MiningRequest(
+        queries,
+        corpus,
+        positives,
+        top_k=5,
+        retrieve_k=12,
+        manifest_values=_manifest_values(),
+    )
+    result = MiningPipeline(query_block_size=3, corpus_block_size=7).run(request)
+    dense_scores = queries.embeddings.float() @ corpus.embeddings.float().T
+    dense_indices = torch.argsort(
+        dense_scores,
+        dim=1,
+        descending=True,
+        stable=True,
+    )[:, :12]
+    expected: list[str] = []
+    for row in dense_indices:
+        retained = [
+            corpus.item_ids[int(index)] for index in row if corpus.item_ids[int(index)] != "c0"
+        ]
+        expected.extend(retained[:5])
+    observed = [row.candidate_id for row in result.negatives]
+    assert observed == expected
+
+
+@pytest.mark.parametrize("name", ["query_block_size", "corpus_block_size"])
+def test_mining_rejects_invalid_block_sizes(name: str) -> None:
+    with pytest.raises(ContractError, match=name):
+        MiningPipeline(**{name: 0})
+
+
 def test_positive_aware_filter_applies_ratio_and_requires_exact_coverage() -> None:
     queries, corpus = _collections()
     pipeline = MiningPipeline(similarity_filter=PositiveAwareSimilarityFilter(alpha=0.9))

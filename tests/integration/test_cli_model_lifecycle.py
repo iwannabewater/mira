@@ -25,18 +25,28 @@ from mira.cli.app import app
 from mira.config import resolve_config
 from mira.core import ExportManifest
 from mira.core.exceptions import CheckpointError, ConfigurationValidationError, ContractError
-from mira.inference import load_inference_manifest, write_inference_manifest
+from mira.inference import (
+    InferenceRuntimeDescriptor,
+    load_inference_manifest,
+    write_inference_manifest,
+)
+from mira.inference import sources as inference_sources
 from mira.integrations.ms_swift import SwiftTemplateSpec
 from mira.integrations.ms_swift.template_bridge import template_fingerprint
-from mira.models.adapters import Qwen3VLEmbeddingAdapter, QwenEmbeddingSemantics
+from mira.models.adapters import Qwen3VLEmbeddingAdapter, Qwen3VLEmbeddingSemantics
 
 _ROOT = Path(__file__).parents[2]
-_CONFIG = _ROOT / "configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml"
+_CONFIG = _ROOT / "configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml"
 _DIMENSION = 2048
-_EOS_TOKEN_ID = 2
+_TERMINAL_TOKEN_ID = 2
 
 
-def _write_local_export(path: Path) -> tuple[Any, ExportManifest]:
+def _write_local_export(
+    path: Path,
+    *,
+    pooling: str = "last_token",
+    template: str = "qwen3_vl_embedding",
+) -> tuple[Any, ExportManifest]:
     resolved = resolve_config(_CONFIG)
     path.mkdir()
     artifacts = {
@@ -50,7 +60,7 @@ def _write_local_export(path: Path) -> tuple[Any, ExportManifest]:
     manifest = ExportManifest(
         model_name_or_path=resolved.config.model.name_or_path,
         model_revision=resolved.config.model.revision,
-        pooling="last_eos",
+        pooling=pooling,
         normalized=True,
         embedding_dimension=resolved.config.model.hidden_size or _DIMENSION,
         representation_type="global",
@@ -58,7 +68,7 @@ def _write_local_export(path: Path) -> tuple[Any, ExportManifest]:
             "attention": resolved.config.runtime.attention,
             "image_max_tokens": resolved.config.data.media.image_max_tokens,
         },
-        template="qwen3_vl_emb",
+        template=template,
         tokenizer="TinyTokenizer",
         processor="TinyProcessor",
         artifact_checksums={relative: file_sha256(path / relative) for relative in artifacts},
@@ -68,6 +78,33 @@ def _write_local_export(path: Path) -> tuple[Any, ExportManifest]:
     )
     write_inference_manifest(manifest, path / "inference-manifest.json")
     return resolved.config, manifest
+
+
+def test_v01_export_labels_load_only_as_an_exact_legacy_pair(tmp_path: Path) -> None:
+    legacy_path = tmp_path / "legacy-export"
+    config, legacy = _write_local_export(
+        legacy_path,
+        pooling="last_eos",
+        template="qwen3_vl_emb",
+    )
+    model_cli._validate_exported_model(
+        legacy_path,
+        config,
+        expected_manifest_checksum=legacy.checksum,
+    )
+
+    mixed_path = tmp_path / "mixed-export"
+    config, mixed = _write_local_export(
+        mixed_path,
+        pooling="last_token",
+        template="qwen3_vl_emb",
+    )
+    with pytest.raises(ContractError, match="semantics differ"):
+        model_cli._validate_exported_model(
+            mixed_path,
+            config,
+            expected_manifest_checksum=mixed.checksum,
+        )
 
 
 def _rewrite_export_manifest(
@@ -118,7 +155,7 @@ class _TinyTemplate:
 
     def encode_item(self, item: Any) -> dict[str, Any]:
         token = sum(item.item_id.encode("utf-8")) % 89 + 3
-        return {"input_ids": [token, _EOS_TOKEN_ID]}
+        return {"input_ids": [token, _TERMINAL_TOKEN_ID]}
 
     def collate_items(self, items: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
         return {
@@ -128,7 +165,11 @@ class _TinyTemplate:
 
 
 class _TinyTokenizer:
-    eos_token_id = _EOS_TOKEN_ID
+    eos_token_id = 3
+
+    def convert_tokens_to_ids(self, token: str) -> int:
+        assert token == "<|endoftext|>"  # noqa: S105 - tokenizer terminal token
+        return _TERMINAL_TOKEN_ID
 
 
 class _TinyProcessor:
@@ -142,9 +183,9 @@ class _TinyProcessor:
 def _assets() -> Any:
     adapter = Qwen3VLEmbeddingAdapter(
         _TinyQwenModel(),
-        semantics=QwenEmbeddingSemantics(
+        semantics=Qwen3VLEmbeddingSemantics(
             model_id="Qwen/Qwen3-VL-Embedding-2B",
-            eos_token_id=_EOS_TOKEN_ID,
+            terminal_token_id=_TERMINAL_TOKEN_ID,
             template_fingerprint=_TinyTemplate.fingerprint,
             embedding_dimension=_DIMENSION,
         ),
@@ -420,9 +461,58 @@ def test_tiny_train_resume_export_reload_and_encode_lifecycle(  # noqa: PLR0915 
 
     def load_for_encode(*_args: Any, **kwargs: Any) -> Any:
         assert kwargs["expected_export_manifest_checksum"] == inference_manifest.checksum
-        return _assets()
+        return fake_encoder
 
-    monkeypatch.setattr(encode_cli, "load_configured_qwen_assets", load_for_encode)
+    class FakeEncoder:
+        runtime = InferenceRuntimeDescriptor(
+            backend="qwen3-vl-embedding-transformers",
+            model_id="Qwen/Qwen3-VL-Embedding-2B",
+            revision=resolved.config.model.revision,
+            template_fingerprint=_TinyTemplate.fingerprint,
+            template_profile="mira_v1",
+            device="cpu",
+            dtype="float32",
+        )
+
+        @staticmethod
+        def _encode(items: list[Any], dimension: int | None) -> torch.Tensor:
+            rows = []
+            for item in items:
+                token = sum(item.item_id.encode("utf-8")) % 89 + 3
+                row = torch.arange(1, _DIMENSION + 1, dtype=torch.float32) * token
+                rows.append(row)
+            values = torch.stack(rows)
+            if dimension is not None:
+                values = values[:, :dimension]
+            return torch.nn.functional.normalize(values, dim=1)
+
+        def encode_query(
+            self,
+            items: list[Any],
+            *,
+            batch_size: int,
+            dimension: int | None,
+            normalize: bool,
+        ) -> torch.Tensor:
+            assert batch_size > 0
+            assert normalize
+            return self._encode(items, dimension)
+
+        def encode_document(
+            self,
+            items: list[Any],
+            *,
+            batch_size: int,
+            dimension: int | None,
+            normalize: bool,
+        ) -> torch.Tensor:
+            assert batch_size > 0
+            assert normalize
+            return self._encode(items, dimension)
+
+    fake_encoder = FakeEncoder()
+
+    monkeypatch.setattr(encode_cli, "load_encoder", load_for_encode)
     encoded_path = tmp_path / "encoded.pt"
     encode_result = runner.invoke(
         app,
@@ -436,6 +526,8 @@ def test_tiny_train_resume_export_reload_and_encode_lifecycle(  # noqa: PLR0915 
             str(encode_input),
             "--output",
             str(encoded_path),
+            "--role",
+            "document",
             "--dimension",
             "16",
             "--expected-export-manifest-checksum",
@@ -524,10 +616,38 @@ def test_validate_data_and_doctor_success_paths(
             str(config),
             "--output-dir",
             str(tmp_path / "doctor-output"),
+            "--device",
+            "cpu",
         ],
     )
     assert doctor.exit_code == 0, doctor.output
-    assert json.loads(doctor.output)["status"] == "pass"
+    doctor_report = json.loads(doctor.output)
+    assert doctor_report["status"] == "pass"
+    assert doctor_report["workflow"] == "training"
+
+    monkeypatch.setattr(
+        doctor_cli,
+        "check_inference_compatibility",
+        lambda: SimpleNamespace(checks=()),
+    )
+    inference_doctor = runner.invoke(
+        app,
+        [
+            "doctor",
+            "--config",
+            str(config),
+            "--output-dir",
+            str(tmp_path / "inference-doctor-output"),
+            "--workflow",
+            "inference",
+            "--device",
+            "cpu",
+        ],
+    )
+    assert inference_doctor.exit_code == 0, inference_doctor.output
+    inference_report = json.loads(inference_doctor.output)
+    assert inference_report["status"] == "pass"
+    assert inference_report["workflow"] == "inference"
 
 
 def test_training_source_attribution_rejects_mislabeled_records(tmp_path: Path) -> None:
@@ -674,7 +794,7 @@ def test_local_export_snapshot_rejects_final_file_replacement(
             source.symlink_to(outside)
         return original_open(path, flags, mode, dir_fd=dir_fd)
 
-    monkeypatch.setattr(model_cli.os, "open", racing_open)
+    monkeypatch.setattr(inference_sources.os, "open", racing_open)
     with pytest.raises(ContractError, match="symlinked"):
         model_cli._validate_exported_model(
             exported,

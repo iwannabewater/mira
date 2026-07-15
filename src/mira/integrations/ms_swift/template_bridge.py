@@ -1,4 +1,4 @@
-"""Exact Qwen3-VL embedding template construction through MS-SWIFT."""
+"""Exact Qwen3-VL-Embedding template construction through MS-SWIFT."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ class SwiftTemplateBridge:
     """Own one immutable upstream template and its reproducible fingerprint."""
 
     def __init__(self, processor: Any, spec: SwiftTemplateSpec) -> None:
-        """Construct the audited Qwen embedding template without fallback."""
+        """Construct the audited Qwen3-VL-Embedding template without fallback."""
         swift_template = import_module("swift.template")
         get_template = getattr(swift_template, "get_template", None)
         if not callable(get_template):
@@ -116,10 +116,12 @@ def template_fingerprint(spec: SwiftTemplateSpec) -> str:
 def validate_qwen_message_roles(item: MultimodalItem) -> None:
     """Reject roles that can replace or bypass the fixed embedding instruction."""
     roles = tuple(message.role for message in item.messages)
-    if roles[0] != "user" or any(role not in {"user", "assistant"} for role in roles):
+    expected = tuple("user" if index % 2 == 0 else "assistant" for index in range(len(roles)))
+    if roles != expected or roles[-1] != "user":
         raise ContractError(
-            "Qwen embedding items must start with user and may contain only user/assistant "
-            f"roles; got {roles}"
+            "Qwen3-VL-Embedding items must start with user, alternate user/assistant roles, "
+            "and end with user; "
+            f"got {roles}"
         )
 
 

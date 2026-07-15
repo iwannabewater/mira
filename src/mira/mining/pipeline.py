@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from types import MappingProxyType
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 import torch
 from torch import Tensor
 
 from mira.core.exceptions import ContractError
-from mira.core.serialization import canonicalize_json_value, freeze_json_value
 from mira.mining.manifests import (
     MiningManifest,
     checksum_mined_rows,
@@ -21,83 +17,11 @@ from mira.mining.manifests import (
 )
 
 if TYPE_CHECKING:
+    from mira.core.encoded import EncodedCollection
     from mira.mining.filters import (
         MetadataFalseNegativeFilter,
         PositiveAwareSimilarityFilter,
     )
-
-_MATRIX_RANK = 2
-
-
-@dataclass(frozen=True, slots=True)
-class EncodedCollection:
-    """IDs, embeddings, and optional metadata aligned on one item axis."""
-
-    item_ids: tuple[str, ...]
-    embeddings: Tensor
-    metadata: tuple[Mapping[str, Any], ...]
-    provenance: Mapping[str, str] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        """Validate alignment, uniqueness, dtype, and finite values."""
-        count = len(self.item_ids)
-        if (
-            count == 0
-            or any(not isinstance(item_id, str) or not item_id for item_id in self.item_ids)
-            or len(set(self.item_ids)) != count
-        ):
-            raise ContractError("encoded item IDs must be non-empty strings and unique")
-        if self.embeddings.ndim != _MATRIX_RANK or self.embeddings.shape[0] != count:
-            raise ContractError("encoded embeddings must have shape [len(item_ids), dimension]")
-        if (
-            not self.embeddings.is_floating_point()
-            or not torch.isfinite(self.embeddings).all().item()
-        ):
-            raise ContractError("encoded embeddings must be finite floating-point values")
-        if len(self.metadata) != count:
-            raise ContractError("encoded metadata must align one-to-one with item IDs")
-        if any(not isinstance(item, Mapping) for item in self.metadata):
-            raise ContractError("encoded metadata entries must be JSON objects")
-        try:
-            frozen_metadata = freeze_json_value(
-                self.metadata,
-                context="encoded metadata",
-            )
-        except (TypeError, ValueError) as error:
-            raise ContractError(str(error)) from error
-        object.__setattr__(
-            self,
-            "metadata",
-            cast("tuple[Mapping[str, Any], ...]", frozen_metadata),
-        )
-        if not isinstance(self.provenance, Mapping) or any(
-            not isinstance(name, str) or not name or not isinstance(value, str) or not value
-            for name, value in self.provenance.items()
-        ):
-            raise ContractError("encoded provenance must contain non-empty string keys and values")
-        object.__setattr__(self, "provenance", MappingProxyType(dict(self.provenance)))
-
-    def checksum(self) -> str:
-        """Hash identifiers, metadata, shape, dtype, and raw tensor bytes."""
-        digest = hashlib.sha256()
-        header = {
-            "dtype": str(self.embeddings.dtype),
-            "item_ids": self.item_ids,
-            "metadata": canonicalize_json_value(self.metadata, context="encoded metadata"),
-            "provenance": dict(self.provenance),
-            "shape": tuple(self.embeddings.shape),
-        }
-        digest.update(
-            json.dumps(
-                header,
-                allow_nan=False,
-                separators=(",", ":"),
-                sort_keys=True,
-            ).encode()
-        )
-        tensor = self.embeddings.detach().cpu().contiguous()
-        digest.update(tensor.view(torch.uint8).numpy().tobytes())
-        return digest.hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +60,6 @@ class _QueryMiningContext:
     request: MiningRequest
     query_index: int
     query_id: str
-    score_row: Tensor
     retrieved_score_row: Tensor
     retrieved_index_row: Tensor
     corpus_positions: dict[str, int]
@@ -152,10 +75,20 @@ class MiningPipeline:
         *,
         metadata_filter: MetadataFalseNegativeFilter | None = None,
         similarity_filter: PositiveAwareSimilarityFilter | None = None,
+        query_block_size: int = 256,
+        corpus_block_size: int = 8192,
     ) -> None:
-        """Configure filters applied after known-positive removal."""
+        """Configure filters and bounded-memory exact-search block sizes."""
+        for name, value in (
+            ("query_block_size", query_block_size),
+            ("corpus_block_size", corpus_block_size),
+        ):
+            if type(value) is not int or value <= 0:
+                raise ContractError(f"{name} must be a positive integer")
         self.metadata_filter = metadata_filter
         self.similarity_filter = similarity_filter
+        self.query_block_size = query_block_size
+        self.corpus_block_size = corpus_block_size
 
     def run(self, request: MiningRequest) -> MiningResult:
         """Retrieve, filter, stratify, and return versioned negatives.
@@ -167,11 +100,13 @@ class MiningPipeline:
         retrieve_k = request.retrieve_k
         _validate_request(request)
         corpus_positions = {item_id: index for index, item_id in enumerate(corpus.item_ids)}
-        scores = queries.embeddings.float() @ corpus.embeddings.float().transpose(0, 1)
-        retrieved_indices = torch.argsort(scores, dim=1, descending=True, stable=True)[
-            :, :retrieve_k
-        ]
-        retrieved_scores = scores.gather(1, retrieved_indices)
+        retrieved_scores, retrieved_indices = _chunked_exact_topk(
+            queries.embeddings,
+            corpus.embeddings,
+            retrieve_k,
+            query_block_size=self.query_block_size,
+            corpus_block_size=self.corpus_block_size,
+        )
         rows: list[MinedNegative] = []
         for query_index, query_id in enumerate(queries.item_ids):
             known_positives = frozenset(request.positives.get(query_id, ()))
@@ -185,13 +120,15 @@ class MiningPipeline:
                 request=request,
                 query_index=query_index,
                 query_id=query_id,
-                score_row=scores[query_index],
                 retrieved_score_row=retrieved_scores[query_index],
                 retrieved_index_row=retrieved_indices[query_index],
                 corpus_positions=corpus_positions,
                 known_positives=known_positives,
                 best_positive=_best_positive_score(
-                    scores[query_index], set(known_positives), corpus_positions
+                    queries.embeddings[query_index],
+                    corpus.embeddings,
+                    set(known_positives),
+                    corpus_positions,
                 ),
             )
             accepted = self._mine_query(context)
@@ -267,7 +204,11 @@ class MiningPipeline:
             "corpus_checksum": request.corpus.checksum(),
             "embedding_dimension": int(request.corpus.embeddings.shape[1]),
             "filters": tuple(filter_values),
-            "index_parameters": {"retrieve_k": request.retrieve_k},
+            "index_parameters": {
+                "corpus_block_size": self.corpus_block_size,
+                "query_block_size": self.query_block_size,
+                "retrieve_k": request.retrieve_k,
+            },
             "index_type": "torch_exact_inner_product",
             "query_checksum": request.queries.checksum(),
             "top_k": request.top_k,
@@ -326,12 +267,72 @@ def _validate_request(request: MiningRequest) -> None:
 
 
 def _best_positive_score(
-    scores: Tensor,
+    query_embedding: Tensor,
+    corpus_embeddings: Tensor,
     positive_ids: set[str],
     positions: dict[str, int],
 ) -> float:
-    indices = torch.tensor([positions[item_id] for item_id in sorted(positive_ids)])
-    return float(scores.index_select(0, indices).max().item())
+    indices = torch.tensor(
+        [positions[item_id] for item_id in sorted(positive_ids)],
+        device=corpus_embeddings.device,
+    )
+    positives = corpus_embeddings.index_select(0, indices)
+    scores = positives.float() @ query_embedding.to(
+        device=corpus_embeddings.device,
+        dtype=torch.float32,
+    )
+    return float(scores.max().item())
+
+
+def _chunked_exact_topk(
+    queries: Tensor,
+    corpus: Tensor,
+    k: int,
+    *,
+    query_block_size: int,
+    corpus_block_size: int,
+) -> tuple[Tensor, Tensor]:
+    """Return stable exact top-k with memory bounded by two block sizes."""
+    score_rows: list[Tensor] = []
+    index_rows: list[Tensor] = []
+    for query_start in range(0, queries.shape[0], query_block_size):
+        query_block = queries[query_start : query_start + query_block_size].float()
+        best_scores = torch.empty(
+            (query_block.shape[0], 0),
+            dtype=torch.float32,
+            device=query_block.device,
+        )
+        best_indices = torch.empty(
+            (query_block.shape[0], 0),
+            dtype=torch.long,
+            device=query_block.device,
+        )
+        for corpus_start in range(0, corpus.shape[0], corpus_block_size):
+            corpus_block = corpus[corpus_start : corpus_start + corpus_block_size].to(
+                device=query_block.device,
+                dtype=torch.float32,
+            )
+            block_scores = query_block @ corpus_block.transpose(0, 1)
+            block_indices = torch.arange(
+                corpus_start,
+                corpus_start + corpus_block.shape[0],
+                dtype=torch.long,
+                device=query_block.device,
+            ).expand(query_block.shape[0], -1)
+            candidate_scores = torch.cat((best_scores, block_scores), dim=1)
+            candidate_indices = torch.cat((best_indices, block_indices), dim=1)
+            keep = min(k, candidate_scores.shape[1])
+            order = torch.argsort(
+                candidate_scores,
+                dim=1,
+                descending=True,
+                stable=True,
+            )[:, :keep]
+            best_scores = candidate_scores.gather(1, order)
+            best_indices = candidate_indices.gather(1, order)
+        score_rows.append(best_scores)
+        index_rows.append(best_indices)
+    return torch.cat(score_rows, dim=0), torch.cat(index_rows, dim=0)
 
 
 def _stratify(query_id: str, accepted: list[tuple[str, float]]) -> list[MinedNegative]:

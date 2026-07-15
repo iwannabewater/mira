@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import torch
 import torch.distributed as dist
@@ -15,17 +15,46 @@ import typer
 
 from mira.cli._common import emit_json
 from mira.config import resolve_config
-from mira.integrations.ms_swift import check_compatibility
+from mira.integrations.ms_swift import (
+    check_compatibility as check_training_compatibility,
+)
+from mira.integrations.qwen3_vl_embedding import (
+    check_compatibility as check_inference_compatibility,
+)
+from mira.integrations.qwen3_vl_embedding.arguments import resolve_device, resolve_dtype
+
+check_compatibility = check_training_compatibility
+"""Compatibility alias retained for callers of the legacy training workflow."""
 
 
 def doctor_command(
-    config: Annotated[Path, typer.Option("--config", exists=True, readable=True)],
-    output_dir: Annotated[Path, typer.Option("--output-dir")] = Path("output"),
+    config: Annotated[
+        Path,
+        typer.Option("--config", exists=True, readable=True, help="Experiment config to check."),
+    ],
+    output_dir: Annotated[
+        Path,
+        typer.Option("--output-dir", help="Directory tested for writable artifact output."),
+    ] = Path("output"),
+    workflow: Annotated[
+        Literal["inference", "training"],
+        typer.Option("--workflow", help="Dependency and hardware contract to verify."),
+    ] = "training",
+    device: Annotated[
+        str,
+        typer.Option("--device", help="Inference device policy; ignored for training checks."),
+    ] = "auto",
+    dtype: Annotated[
+        Literal["auto", "float32", "float16", "bfloat16"],
+        typer.Option("--dtype", help="Inference dtype policy; ignored for training checks."),
+    ] = "auto",
 ) -> None:
-    """Check accelerator, dependencies, environment, model path, and output access."""
+    """Check inference or training dependencies, devices, and artifact access."""
     resolved = resolve_config(config)
     checks: list[dict[str, Any]] = []
-    compatibility = check_compatibility()
+    compatibility = (
+        check_inference_compatibility() if workflow == "inference" else check_compatibility()
+    )
     checks.extend(
         {
             "detail": check.reason,
@@ -36,19 +65,26 @@ def doctor_command(
         }
         for check in compatibility.checks
     )
-    cuda = torch.cuda.is_available()
-    checks.append(
-        {
-            "detail": f"device_count={torch.cuda.device_count()}",
-            "name": "cuda",
-            "status": "pass" if cuda else "fail",
-        }
+    if workflow == "inference":
+        checks.append(_inference_device_check(device, dtype))
+    else:
+        cuda = torch.cuda.is_available()
+        checks.append(
+            {
+                "detail": f"device_count={torch.cuda.device_count()}",
+                "name": "cuda",
+                "status": "pass" if cuda else "fail",
+            }
+        )
+    nccl_required = (
+        workflow == "training" and resolved.config.runtime.distributed.strategy.value != "single"
     )
+    nccl_available = dist.is_nccl_available()
     checks.append(
         {
-            "detail": "torch.distributed NCCL backend availability",
+            "detail": f"required={nccl_required}",
             "name": "nccl",
-            "status": "pass" if dist.is_nccl_available() else "fail",
+            "status": ("pass" if nccl_available else "fail" if nccl_required else "not_required"),
         }
     )
     flash_required = resolved.config.runtime.attention == "flash_attention_2"
@@ -72,10 +108,27 @@ def doctor_command(
             "python": sys.version.split()[0],
             "status": "fail" if failures else "pass",
             "torch": torch.__version__,
+            "workflow": workflow,
         }
     )
     if failures:
         raise typer.Exit(code=1)
+
+
+def _inference_device_check(
+    device: str,
+    dtype: Literal["auto", "float32", "float16", "bfloat16"],
+) -> dict[str, str]:
+    try:
+        resolved_device = resolve_device(device)
+        resolved_dtype = resolve_dtype(dtype, resolved_device)
+    except ValueError as error:
+        return {"detail": str(error), "name": "inference_device", "status": "fail"}
+    return {
+        "detail": f"device={resolved_device}, dtype={str(resolved_dtype).removeprefix('torch.')}",
+        "name": "inference_device",
+        "status": "pass",
+    }
 
 
 def _distributed_environment_check() -> dict[str, str]:

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from mira.core.exceptions import ConfigurationValidationError
-from mira.models.qwen_audit import AUDITED_QWEN_TARGETS
+from mira.models.qwen3_vl_embedding_audit import AUDITED_QWEN3_VL_EMBEDDING_TARGETS
 
 _TORCH_DTYPES = frozenset({"auto", "float32", "float16", "bfloat16"})
 _ATTENTION_IMPLEMENTATIONS = frozenset({"auto", "eager", "sdpa", "flash_attention_2"})
@@ -30,11 +30,14 @@ class SwiftLoadSpec:
 
     def __post_init__(self) -> None:
         """Validate identifiers before importing the optional backend."""
-        if type(self.model_id) is not str or self.model_id not in AUDITED_QWEN_TARGETS:
+        if (
+            type(self.model_id) is not str
+            or self.model_id not in AUDITED_QWEN3_VL_EMBEDDING_TARGETS
+        ):
             raise ConfigurationValidationError(
-                "MS-SWIFT model_id must be one of the two audited Qwen model IDs"
+                "MS-SWIFT model_id must be one of the audited Qwen3-VL-Embedding model IDs"
             )
-        target = AUDITED_QWEN_TARGETS[self.model_id]
+        target = AUDITED_QWEN3_VL_EMBEDDING_TARGETS[self.model_id]
         if type(self.revision) is not str or self.revision != target.revision:
             raise ConfigurationValidationError(
                 f"MS-SWIFT model {self.model_id!r} requires immutable revision {target.revision}"
@@ -57,7 +60,9 @@ class SwiftLoadSpec:
             "MS-SWIFT task_type must be 'embedding'",
         )
         if type(self.use_hf) is not bool or not self.use_hf:
-            raise ConfigurationValidationError("audited Qwen targets require use_hf=True")
+            raise ConfigurationValidationError(
+                "audited Qwen3-VL-Embedding targets require use_hf=True"
+            )
         if self.device_map is not None and (
             type(self.device_map) is not str
             or not self.device_map
@@ -79,7 +84,9 @@ class SwiftLoadSpec:
         ):
             raise ConfigurationValidationError("image_max_tokens must be a positive integer")
         if type(self.load_model) is not bool or not self.load_model:
-            raise ConfigurationValidationError("Qwen adapter construction requires load_model=True")
+            raise ConfigurationValidationError(
+                "Qwen3-VL-Embedding adapter construction requires load_model=True"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +109,7 @@ class SwiftTemplateSpec:
             raise ConfigurationValidationError("embedding instruction must be a canonical string")
         if type(self.template_type) is not str or self.template_type != "qwen3_vl_emb":
             raise ConfigurationValidationError(
-                "the stable Qwen bridge requires template_type='qwen3_vl_emb'"
+                "the stable Qwen3-VL-Embedding bridge requires template_type='qwen3_vl_emb'"
             )
         if type(self.max_length) is not int or self.max_length <= 0:
             raise ConfigurationValidationError("template max_length must be a positive integer")

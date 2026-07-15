@@ -68,7 +68,7 @@ uv run pytest --no-cov -m distributed
 
 The test launches two local Gloo workers and covers unequal query and candidate rows, detached-remote gradients, full-autograd gather gradients, global-query DDP scaling, metadata mismatch rejection, and collective-order mismatch rejection.
 
-This test ran successfully on CPU/Gloo for the release snapshot. It does not exercise CUDA kernels, NCCL collectives, multi-node networking, or a Qwen model.
+This test ran successfully on CPU/Gloo for the release snapshot. It does not exercise CUDA kernels, NCCL collectives, multi-node networking, or a Qwen3-VL-Embedding model.
 
 ## Production boundary
 

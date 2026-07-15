@@ -24,7 +24,8 @@ The Qwen3-VL-Embedding model card requires `transformers>=4.57.0`, `qwen-vl-util
 ### Security resolution snapshot
 
 The release audit resolved the MS-SWIFT framework requirements together with
-the Qwen-specific `transformers>=4.57,<5.13`, `qwen-vl-utils>=0.0.14`, and
+the Qwen3-VL-Embedding-specific `transformers>=4.57,<5.13`,
+`qwen-vl-utils>=0.0.14`, and
 `decord` requirements for CPython 3.11 on x86-64 manylinux. The resolver was
 uv 0.11.21 in highest-version mode. It produced 151 exact pins, including
 Gradio 5.50.0, Pillow 11.3.0, and Starlette 0.52.1. pip-audit 2.10.1 emitted
@@ -58,7 +59,8 @@ uv run pip-audit \
   --output /tmp/mira-ms-swift-qwen-audit.json
 ```
 
-The overlay contained only the three Qwen-specific requirements named above.
+The overlay contained only the three Qwen3-VL-Embedding-specific requirements
+named above.
 The pinned-resolution SHA-256 was
 `f1bae58d1bec495b697c42f0400643b074b2a47f0073a4159f9fbfb795b9fe0f`;
 the JSON audit-report SHA-256 was
@@ -72,13 +74,13 @@ Gradio 5.50.0 itself requires `pillow<12.0` and `starlette<1.0`; MS-SWIFT
 selected inside this upstream graph. MIRA excludes the backend dependency
 extra instead of suppressing these findings.
 
-## Model registration and Qwen output path
+## Qwen3-VL-Embedding registration and output path
 
-MS-SWIFT registers both Qwen3-VL embedding sizes under `qwen3_vl_emb`. The registration uses `Qwen3VLEmbLoader`, the Qwen3-VL architecture, and explicit requirements for Transformers 4.57, `qwen_vl_utils`, and `decord` in [`swift/model/models/qwen.py`](https://github.com/modelscope/ms-swift/blob/98a09c18cdf95ff07051324b9b8cc90f5184b24b/swift/model/models/qwen.py#L2092-L2115).
+MS-SWIFT registers both Qwen3-VL-Embedding sizes under its internal `qwen3_vl_emb` identifier. The registration uses `Qwen3VLEmbLoader`, the underlying Qwen3-VL architecture, and explicit requirements for Transformers 4.57, `qwen_vl_utils`, and `decord` in [`swift/model/models/qwen.py`](https://github.com/modelscope/ms-swift/blob/98a09c18cdf95ff07051324b9b8cc90f5184b24b/swift/model/models/qwen.py#L2092-L2115).
 
 The Swift template adds an empty assistant turn when needed, sets the default system instruction to `Represent the user's input.`, and terminates with `<|endoftext|>` in [`swift/template/templates/qwen.py`](https://github.com/modelscope/ms-swift/blob/98a09c18cdf95ff07051324b9b8cc90f5184b24b/swift/template/templates/qwen.py#L648-L662). Training and inference must preserve all three details.
 
-Swift converts a causal language model into an embedding model through a forward hook. The hook selects the last valid hidden state from `output.logits`, applies L2 normalization, and returns it as `last_hidden_state` in [`swift/model/patcher.py`](https://github.com/modelscope/ms-swift/blob/98a09c18cdf95ff07051324b9b8cc90f5184b24b/swift/model/patcher.py#L75-L102). The official Qwen script instead returns token-level hidden states, pools the last valid token using the attention mask, then normalizes in its `process` method. MIRA treats the pooled vector and its normalization state as explicit adapter output metadata so objectives never guess whether normalization already happened.
+Swift converts a causal language model into an embedding model through a forward hook. The hook selects the last valid hidden state from `output.logits`, applies L2 normalization, and returns it as `last_hidden_state` in [`swift/model/patcher.py`](https://github.com/modelscope/ms-swift/blob/98a09c18cdf95ff07051324b9b8cc90f5184b24b/swift/model/patcher.py#L75-L102). The official Qwen3-VL-Embedding script instead returns token-level hidden states, pools the last valid token using the attention mask, then normalizes in its `process` method. MIRA treats the pooled vector and its normalization state as explicit adapter output metadata so objectives never guess whether normalization already happened.
 
 ## Template, dataset, and collator path
 
@@ -116,7 +118,7 @@ MS-SWIFT exposes `freeze_llm`, `freeze_vit`, and `freeze_aligner`, with defaults
 
 The generic template supports packing and padding-free operation for embedding tasks. Those transforms flatten or repack sequences before the model forward pass. A valid embedding layout therefore cannot use token positions as record boundaries after packing. MIRA keeps group identity outside model token tensors and validates any backend combination before the first collective call.
 
-The Hugging Face trainer, native Swift trainer, and Megatron-SWIFT trainer do not share checkpoint or distributed semantics. The Megatron Qwen3-VL embedding example enables sequence parallelism but explicitly disables optimizer and RNG checkpoint state in [`examples/megatron/embedding/qwen3_vl_emb.sh`](https://github.com/modelscope/ms-swift/blob/98a09c18cdf95ff07051324b9b8cc90f5184b24b/examples/megatron/embedding/qwen3_vl_emb.sh#L1-L36). Such a checkpoint cannot satisfy MIRA's `resume_full` contract.
+The Hugging Face trainer, native Swift trainer, and Megatron-SWIFT trainer do not share checkpoint or distributed semantics. The Megatron Qwen3-VL-Embedding example enables sequence parallelism but explicitly disables optimizer and RNG checkpoint state in [`examples/megatron/embedding/qwen3_vl_emb.sh`](https://github.com/modelscope/ms-swift/blob/98a09c18cdf95ff07051324b9b8cc90f5184b24b/examples/megatron/embedding/qwen3_vl_emb.sh#L1-L36). Such a checkpoint cannot satisfy MIRA's `resume_full` contract.
 
 ## Checkpoint, resume, and export boundary
 
@@ -130,9 +132,9 @@ planned maximum steps, and template fingerprint. The state file carries the
 model, optimizer, scheduler, RNG, sampler, objective, and training counters
 saved by the Phase-1 CLI.
 
-The MS-SWIFT facade binds its cached Qwen model to this generic MIRA checkpoint
+The MS-SWIFT facade binds its cached Qwen3-VL-Embedding model to this generic MIRA checkpoint
 manager. It does not call Swift checkpoint handlers or claim compatibility with
-Swift-native checkpoint formats. Export also runs through MIRA's Qwen adapter;
+Swift-native checkpoint formats. Export also runs through MIRA's Qwen3-VL-Embedding adapter;
 any PEFT merge is an explicit MIRA CLI step before that export.
 
 `resume_full` verifies the checkpoint and provenance, then restores those
@@ -143,12 +145,12 @@ restore target are supplied. `resume_model_only` restores only the full model.
 modes fail when required state is missing or incompatible. An optional manifest
 SHA-256 obtained through a trusted channel can authenticate the manifest before
 parsing; internal file checksums alone detect accidental corruption. The real
-MS-SWIFT and Qwen resume lane is `NOT RUN` because backend installation is
-security-blocked and model weights were not loaded.
+MS-SWIFT and Qwen3-VL-Embedding resume lane is `NOT RUN` because backend installation is
+security-blocked and Qwen3-VL-Embedding weights were not loaded.
 
 ## License findings
 
-MS-SWIFT and both Qwen3-VL-Embedding model repositories declare Apache License 2.0. MIRA uses the same project license. MIRA source is original unless a file header says otherwise. No MS-SWIFT implementation is copied into the core package. `NOTICE` identifies MS-SWIFT and Qwen sources used for interoperability research. Training checkpoint provenance keeps model and training plus validation dataset licenses. Export manifests keep the model revision and model licenses, not dataset rights.
+MS-SWIFT and both Qwen3-VL-Embedding model repositories declare Apache License 2.0. MIRA uses the same project license. MIRA source is original unless a file header says otherwise. No MS-SWIFT implementation is copied into the core package. `NOTICE` identifies MS-SWIFT and Qwen3-VL-Embedding sources used for interoperability research. Training checkpoint provenance keeps model and training plus validation dataset licenses. Export manifests keep the model revision and model licenses, not dataset rights.
 
 ## Verification state
 

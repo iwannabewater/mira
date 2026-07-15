@@ -79,7 +79,7 @@ def train_command(  # noqa: PLR0912, PLR0913, PLR0915 - explicit lifecycle contr
         typer.Option("--expected-manifest-sha256"),
     ] = None,
 ) -> None:
-    """Train a real Qwen adapter for bounded steps and save a full checkpoint."""
+    """Train Qwen3-VL-Embedding for bounded steps and save a full checkpoint."""
     resolved = resolve_config(config, overrides=tuple(overrides or ()))
     experiment = resolved.config
     _validate_cli_runtime(experiment)
@@ -460,7 +460,8 @@ def _validate_qwen_records(records: Sequence[EmbeddingRecord]) -> None:
     )
     if unsupported_instructions:
         raise ConfigurationValidationError(
-            "training items must use the configured Qwen instruction; offending items: "
+            "training items must use the configured Qwen3-VL-Embedding instruction; "
+            "offending items: "
             f"{unsupported_instructions}"
         )
     for record in records:

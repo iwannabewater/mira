@@ -1,5 +1,6 @@
 """Versioned offline hard-negative mining."""
 
+from mira.core.encoded import EncodedCollection
 from mira.mining.filters import (
     MetadataFalseNegativeFilter,
     PositiveAwareSimilarityFilter,
@@ -7,7 +8,6 @@ from mira.mining.filters import (
 )
 from mira.mining.manifests import MiningManifest
 from mira.mining.pipeline import (
-    EncodedCollection,
     MinedNegative,
     MiningPipeline,
     MiningRequest,

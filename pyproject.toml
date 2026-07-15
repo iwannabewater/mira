@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "mira-embed"
 dynamic = ["version"]
-description = "Research and reference infrastructure for multimodal embedding post-training"
+description = "Strict training, inference, mining, and evaluation for multimodal embeddings"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = "Apache-2.0"
@@ -34,12 +34,20 @@ dependencies = [
   "numpy>=1.26.4,<2.5",
   "pydantic>=2.11,<3",
   "pyyaml>=6.0.2,<7",
+  "safetensors>=0.8,<0.9",
   "torch>=2.8,<3",
   "typer>=0.16,<1",
 ]
 
 [project.optional-dependencies]
 faiss = ["faiss-cpu>=1.11,<2; platform_system == 'Linux'"]
+inference-qwen3-vl-embedding = [
+  "accelerate>=1.14,<1.15",
+  "peft>=0.19.1,<0.20",
+  "qwen-vl-utils>=0.0.14,<0.0.15",
+  "transformers>=5.13.1,<5.14",
+  "torchvision>=0.28,<0.29",
+]
 
 [project.scripts]
 mira = "mira.cli.app:app"
@@ -51,7 +59,7 @@ Repository = "https://github.com/iwannabewater/mira"
 
 [dependency-groups]
 dev = [
-  "build>=1.2.2,<2",
+  "build>=1.2.2,<1.5.1",
   "editables==0.5",
   "hatchling==1.31.0",
   "hypothesis>=6.135,<7",
@@ -89,6 +97,10 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mira"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml" = "mira/reference_configs/qwen3_vl_embedding_2b_single_gpu_lora.yaml"
+"configs/experiments/qwen3_vl_embedding_ecommerce.yaml" = "mira/reference_configs/qwen3_vl_embedding_ecommerce.yaml"
 
 [tool.hatch.version]
 path = "src/mira/version.py"

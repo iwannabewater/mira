@@ -17,7 +17,7 @@ from mira.core.contracts import (
 )
 from mira.core.exceptions import CheckpointError, ContractError, InvalidEmbeddingError
 from mira.core.layout import GroupLayout
-from mira.models.adapters import Qwen3VLEmbeddingAdapter, QwenEmbeddingSemantics
+from mira.models.adapters import Qwen3VLEmbeddingAdapter, Qwen3VLEmbeddingSemantics
 from mira.models.base import TuningSpec
 from mira.models.pooling import (
     last_token_pool,
@@ -90,9 +90,9 @@ def _batch(fingerprint: str = "template-v1") -> EmbeddingBatch:
 def _adapter() -> Qwen3VLEmbeddingAdapter:
     return Qwen3VLEmbeddingAdapter(
         _TinyCausalModel(),
-        semantics=QwenEmbeddingSemantics(
+        semantics=Qwen3VLEmbeddingSemantics(
             model_id="local/tiny-qwen",
-            eos_token_id=9,
+            terminal_token_id=9,
             template_fingerprint="template-v1",
             embedding_dimension=4,
         ),
@@ -120,7 +120,7 @@ def test_pooling_rejects_zero_vectors_and_empty_rows() -> None:
         last_token_pool(torch.ones(1, 2, 3), torch.zeros(1, 2))
 
 
-def test_qwen_adapter_enforces_prompt_eos_and_dimension_semantics() -> None:
+def test_qwen3_vl_embedding_adapter_enforces_terminal_token_and_dimension() -> None:
     adapter = _adapter()
     batch = _batch()
     inputs = adapter.prepare_inputs(batch, "train")
@@ -138,7 +138,7 @@ def test_qwen_adapter_enforces_prompt_eos_and_dimension_semantics() -> None:
         adapter.prepare_inputs(_batch("wrong"), "train")
     invalid_inputs = dict(inputs)
     invalid_inputs["input_ids"] = torch.tensor([[1, 8], [1, 9], [2, 9]])
-    with pytest.raises(ContractError, match="EOS"):
+    with pytest.raises(ContractError, match="terminate every input"):
         adapter.forward_representations(invalid_inputs, RepresentationRequest())
     with pytest.raises(InvalidEmbeddingError, match=r"dimension 5.*exceeds.*dimension 4"):
         adapter.forward_representations(

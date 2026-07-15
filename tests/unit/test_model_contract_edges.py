@@ -19,7 +19,7 @@ from mira.core.contracts import (
 )
 from mira.core.exceptions import CapabilityError, ContractError, InvalidEmbeddingError
 from mira.core.layout import GroupLayout
-from mira.models.adapters import Qwen3VLEmbeddingAdapter, QwenEmbeddingSemantics
+from mira.models.adapters import Qwen3VLEmbeddingAdapter, Qwen3VLEmbeddingSemantics
 from mira.models.base import ExportConfig, ExportManifest, ParameterGroupSpec, TuningSpec
 from mira.models.pooling import (
     last_token_pool,
@@ -120,9 +120,9 @@ def _adapter(
 ) -> Qwen3VLEmbeddingAdapter:
     return Qwen3VLEmbeddingAdapter(
         model or _ForwardModel(),
-        semantics=QwenEmbeddingSemantics(
+        semantics=Qwen3VLEmbeddingSemantics(
             model_id=model_id,
-            eos_token_id=9,
+            terminal_token_id=9,
             template_fingerprint="template-v1",
             embedding_dimension=dimension,
         ),
@@ -133,19 +133,19 @@ def _adapter(
     ("spec", "message"),
     [
         (
-            QwenEmbeddingSemantics(" ", 9, "template", embedding_dimension=4),
+            Qwen3VLEmbeddingSemantics(" ", 9, "template", embedding_dimension=4),
             "model_id",
         ),
         (
-            QwenEmbeddingSemantics("local/model", -1, "template", embedding_dimension=4),
-            "eos_token_id",
+            Qwen3VLEmbeddingSemantics("local/model", -1, "template", embedding_dimension=4),
+            "terminal_token_id",
         ),
         (
-            QwenEmbeddingSemantics("local/model", 9, " ", embedding_dimension=4),
+            Qwen3VLEmbeddingSemantics("local/model", 9, " ", embedding_dimension=4),
             "fingerprint",
         ),
         (
-            QwenEmbeddingSemantics(
+            Qwen3VLEmbeddingSemantics(
                 "local/model",
                 9,
                 "template",
@@ -155,11 +155,11 @@ def _adapter(
             "instruction",
         ),
         (
-            QwenEmbeddingSemantics("local/model", 9, "template"),
+            Qwen3VLEmbeddingSemantics("local/model", 9, "template"),
             "embedding_dimension",
         ),
         (
-            QwenEmbeddingSemantics(
+            Qwen3VLEmbeddingSemantics(
                 "Qwen/Qwen3-VL-Embedding-2B",
                 9,
                 "template",
@@ -168,7 +168,7 @@ def _adapter(
             "official dimension",
         ),
         (
-            QwenEmbeddingSemantics(
+            Qwen3VLEmbeddingSemantics(
                 "Qwen/Qwen3-VL-Embedding-2B",
                 9,
                 "template",
@@ -177,7 +177,7 @@ def _adapter(
             "positive integer",
         ),
         (
-            QwenEmbeddingSemantics(
+            Qwen3VLEmbeddingSemantics(
                 "local/model",
                 9,
                 "template",
@@ -188,7 +188,7 @@ def _adapter(
     ],
 )
 def test_qwen_semantics_reject_invalid_contracts(
-    spec: QwenEmbeddingSemantics,
+    spec: Qwen3VLEmbeddingSemantics,
     message: str,
 ) -> None:
     with pytest.raises(ContractError, match=message):
@@ -303,6 +303,16 @@ def test_qwen_forward_supports_full_dimension_without_normalization() -> None:
     assert output.global_embeddings.shape == (2, 4)
     assert output.layer_embeddings is not None
     assert output.layer_embeddings[-1].shape == (2, 4)
+
+
+def test_qwen_global_forward_does_not_retain_all_hidden_layers() -> None:
+    model = _ForwardModel()
+    output = _adapter(model).forward_representations(
+        _batch().model_inputs,
+        RepresentationRequest(normalize=True),
+    )
+    assert output.global_embeddings is not None
+    assert model.received["output_hidden_states"] is False
 
 
 @pytest.mark.parametrize("output_kind", ["missing", "empty", "wrong-rank", "non-tensor"])

@@ -11,8 +11,10 @@ import typer
 
 from mira.cli._common import (
     emit_json,
+    encoded_template_checksum,
     file_sha256,
     load_encoded_collection,
+    model_source_checksum,
     require_matching_encoded_provenance,
     validate_encoded_provenance,
     write_json_file,
@@ -20,8 +22,6 @@ from mira.cli._common import (
 from mira.config import resolve_config
 from mira.core.exceptions import ContractError
 from mira.evaluation import ExactSearchEvaluator, build_slice_masks, slice_metrics
-from mira.integrations.ms_swift import SwiftTemplateSpec
-from mira.integrations.ms_swift.template_bridge import template_fingerprint
 from mira.models.pooling import truncate_and_normalize
 
 if TYPE_CHECKING:
@@ -33,13 +33,21 @@ _CUTOFF = re.compile(r"^[a-z]+@(\d+)$")
 
 
 def evaluate_command(  # noqa: PLR0913 - explicit artifact paths are the CLI contract
-    checkpoint: Annotated[Path, typer.Option("--checkpoint", exists=True, readable=True)],
+    checkpoint: Annotated[str, typer.Option("--checkpoint")],
     config: Annotated[Path, typer.Option("--config", exists=True, readable=True)],
     queries: Annotated[Path, typer.Option("--queries", exists=True, readable=True)],
     candidates: Annotated[Path, typer.Option("--candidates", exists=True, readable=True)],
     relevance: Annotated[Path, typer.Option("--relevance", exists=True, readable=True)],
     output: Annotated[Path, typer.Option("--output")],
     dimension: Annotated[int | None, typer.Option("--dimension", min=1)] = None,
+    expected_queries_manifest_sha256: Annotated[
+        str | None,
+        typer.Option("--expected-queries-manifest-sha256"),
+    ] = None,
+    expected_candidates_manifest_sha256: Annotated[
+        str | None,
+        typer.Option("--expected-candidates-manifest-sha256"),
+    ] = None,
 ) -> None:
     """Run exact cosine retrieval and write aggregate plus per-query evidence."""
     resolved = resolve_config(config)
@@ -50,14 +58,22 @@ def evaluate_command(  # noqa: PLR0913 - explicit artifact paths are the CLI con
             f"trained evaluation dimensions: {allowed_dimensions}"
         )
     configured_dimensions = (dimension,) if dimension is not None else allowed_dimensions
-    query_collection = load_encoded_collection(queries)
-    candidate_collection = load_encoded_collection(candidates)
+    query_collection = load_encoded_collection(
+        queries,
+        expected_manifest_sha256=expected_queries_manifest_sha256,
+        expected_role="query",
+    )
+    candidate_collection = load_encoded_collection(
+        candidates,
+        expected_manifest_sha256=expected_candidates_manifest_sha256,
+        expected_role="document",
+    )
     require_matching_encoded_provenance(query_collection, candidate_collection)
-    template_checksum = template_fingerprint(SwiftTemplateSpec())
+    template_checksum = encoded_template_checksum(query_collection, resolved.config)
     for collection in (query_collection, candidate_collection):
         validate_encoded_provenance(
             collection,
-            str(checkpoint),
+            checkpoint,
             resolved.config,
             config_checksum=resolved.checksum,
             template_checksum=template_checksum,
@@ -105,7 +121,7 @@ def evaluate_command(  # noqa: PLR0913 - explicit artifact paths are the CLI con
         }
     largest_report = dimension_reports[str(configured_dimensions[-1])]
     payload: dict[str, Any] = {
-        "checkpoint_checksum": file_sha256(checkpoint),
+        "checkpoint_checksum": model_source_checksum(checkpoint, resolved.config),
         "candidate_collection_checksum": candidate_collection.checksum(),
         "config_checksum": resolved.checksum,
         "dimension": configured_dimensions[-1],

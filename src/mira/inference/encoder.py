@@ -27,9 +27,42 @@ _GLOBAL_EMBEDDING_RANK = 2
 _TOKEN_EMBEDDING_RANK = 3
 
 
+@dataclass(frozen=True, slots=True)
+class InferenceRuntimeDescriptor:
+    """Backend-neutral identity needed to publish reproducible artifacts."""
+
+    backend: str
+    model_id: str
+    revision: str
+    template_fingerprint: str
+    template_profile: str
+    device: str
+    dtype: str
+
+    def __post_init__(self) -> None:
+        """Reject incomplete runtime identities before they reach artifact metadata."""
+        for name in (
+            "backend",
+            "model_id",
+            "revision",
+            "template_fingerprint",
+            "template_profile",
+            "device",
+            "dtype",
+        ):
+            value = getattr(self, name)
+            if type(value) is not str or not value or value != value.strip():
+                raise ConfigurationError(f"inference runtime {name} must be canonical")
+
+
 @runtime_checkable
 class EncoderBackend(Protocol):
     """Raw-input inference boundary implemented by model integrations."""
+
+    @property
+    def runtime(self) -> InferenceRuntimeDescriptor:
+        """Return immutable provenance without exposing backend internals."""
+        raise NotImplementedError
 
     def encode_batch(
         self,
@@ -139,6 +172,19 @@ class Encoder:
             "document_instruction", document_instruction
         )
         self._default_batch_size = default_batch_size
+
+    @property
+    def backend(self) -> EncoderBackend:
+        """Return the concrete backend for capability and provenance inspection."""
+        return self._backend
+
+    @property
+    def runtime(self) -> InferenceRuntimeDescriptor:
+        """Return the backend-neutral runtime identity used by artifact writers."""
+        descriptor = self._backend.runtime
+        if not isinstance(descriptor, InferenceRuntimeDescriptor):
+            raise ConfigurationError("inference backend returned an invalid runtime descriptor")
+        return descriptor
 
     def encode_query(
         self,

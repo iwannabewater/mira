@@ -108,7 +108,7 @@ def test_export_manifest_carries_inference_semantics_and_checksum(tmp_path) -> N
         embedding_dimension=4096,
         representation_type="global",
         visual_preprocessing={"image_max_tokens": 768, "image_mean": [0.5]},
-        template="qwen3_vl_emb",
+        template="qwen3_vl_embedding",
         tokenizer="tokenizer.json",
         processor="processor_config.json",
         artifact_checksums={"model.safetensors": "b" * 64},

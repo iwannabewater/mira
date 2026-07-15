@@ -6,7 +6,7 @@ Date: 2026-07-14
 
 ## Context
 
-MIRA needs Qwen3-VL model loading, official prompt construction, multimodal preprocessing, PEFT, distributed launch support, checkpoint integration, and export. MS-SWIFT supplies the model, template, and trainer entry points; the PEFT package supplies adapter construction. MIRA supplies the checkpoint and export contracts. The Swift embedding path also encodes assumptions that conflict with MIRA's domain contract: one positive per record, positional group inference, environment-driven objective settings, detached remote negatives, and warning-based MRL dimension handling.
+MIRA needs Qwen3-VL-Embedding model loading, official prompt construction, multimodal preprocessing, PEFT, distributed launch support, checkpoint integration, and export. MS-SWIFT supplies the model, template, and trainer entry points; the PEFT package supplies adapter construction. MIRA supplies the checkpoint and export contracts. The Swift embedding path also encodes assumptions that conflict with MIRA's domain contract: one positive per record, positional group inference, environment-driven objective settings, detached remote negatives, and warning-based MRL dimension handling.
 
 Forking MS-SWIFT would make MIRA responsible for a large and fast-moving training stack. Importing its embedding trainer directly would make core mathematical behavior depend on those assumptions.
 
@@ -75,7 +75,7 @@ MIRA 0.1 does not publish the optional dependency because the compatible
 MS-SWIFT graph does not pass the security audit. Removing the source adapter
 would require deleting its registration and integration package. It would not
 change stored MIRA records, objective definitions, evaluation data, or core
-checkpoint format. Loading a MIRA checkpoint for a Qwen model would still
+checkpoint format. Loading a MIRA checkpoint for Qwen3-VL-Embedding would still
 require a compatible backend installation to reconstruct that model. The
 facade does not claim support for reading Swift-native checkpoint formats.
 

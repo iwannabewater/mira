@@ -28,7 +28,7 @@ from mira.core import (
     MigrationError,
 )
 
-FIXTURE = Path(__file__).parents[1] / "fixtures" / "configs" / "qwen3_vl_ecommerce.yaml"
+FIXTURE = Path(__file__).parents[1] / "fixtures" / "configs" / "qwen3_vl_embedding_ecommerce.yaml"
 
 
 def test_master_prompt_ecommerce_yaml_parses_as_real_config() -> None:

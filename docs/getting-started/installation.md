@@ -1,88 +1,146 @@
 # Installation
 
-MIRA 0.1 supports Linux and macOS with Python 3.11 or 3.12. The locked development environment uses Python 3.12.13. Windows is not supported because root-confined configuration, media, and local-export readers require POSIX descriptor-relative traversal with `O_DIRECTORY` and `O_NOFOLLOW`; unsupported hosts fail closed. The base package installs the CPU-capable reference contracts; FAISS is optional.
+MIRA supports Python 3.11 and 3.12 on Linux and macOS. The secure filesystem
+boundary requires POSIX descriptor-relative operations; Windows is not a
+supported runtime.
 
-## Install from this checkout
+## Choose an environment
 
-Install [uv](https://docs.astral.sh/uv/), then run:
+The base package covers configuration, data validation, objectives,
+checkpoints, mining, and exact evaluation:
+
+```bash
+python -m pip install mira-embed
+```
+
+Install the direct Qwen3-VL-Embedding inference runtime with:
+
+```bash
+python -m pip install "mira-embed[inference-qwen3-vl-embedding]"
+mira init-config \
+  --preset qwen3-vl-embedding-2b-single-gpu-lora \
+  --output mira.yaml
+```
+
+Repository contributors should use the lock:
 
 ```bash
 git clone https://github.com/iwannabewater/mira.git
 cd mira
-make sync
-uv run --no-sync mira --help
+uv sync --frozen --extra inference-qwen3-vl-embedding
 ```
 
-`uv.lock` is the dependency record. `make sync` installs that lock in two steps and builds MIRA without a fresh isolated build-dependency resolution.
+`inference-qwen3-vl-embedding` installs the exact supported ranges for Transformers,
+Accelerate, PEFT, qwen-vl-utils, torchvision, and safetensors. MIRA checks those
+ranges before importing model code.
 
-For development, run the complete local gate after installation:
+## Verify inference dependencies
 
 ```bash
-make check
+mira doctor \
+  --workflow inference \
+  --device auto \
+  --dtype auto \
+  --config mira.yaml
 ```
 
-## MS-SWIFT security boundary
+The command reports package versions, the selected device and dtype,
+FlashAttention requirements, model location, and output-directory access. A
+missing optional package returns a nonzero status and names the required range.
 
-MIRA contains a lazy adapter boundary for the source-audited MS-SWIFT 4.4.1
-release, but MIRA 0.1 does not publish an installable `ms-swift` extra.
-MS-SWIFT 4.4.1 requires `gradio<6`. The compatible dependency resolution
-retains known advisories in Gradio, Pillow, and Starlette, while the patched
-versions fall outside that upstream dependency graph. The release security
-gate therefore blocks installation of this backend.
-
-There is no supported MS-SWIFT installation command for this release. Re-audit
-the complete resolved graph before adding a future backend extra. Installing
-MS-SWIFT manually does not turn the Qwen or accelerator lanes into supported
-paths.
-
-`mira doctor` writes its JSON report to standard output. `--output-dir` checks
-that a target directory is writable; it does not store the report. In the base
-environment, the command is expected to exit with status 1 because required
-backend and accelerator checks fail. You can still preserve that failure
-evidence:
+You can also verify the tuple from Python:
 
 ```bash
-mkdir -p runs/doctor-qwen3-vl-2b
+python -c \
+  'from mira.integrations.qwen3_vl_embedding import require_compatible; print(require_compatible())'
+```
+
+## Device policy
+
+The default `device=auto` order is CUDA, MPS, then CPU. The default dtype is:
+
+| Device | Automatic dtype |
+| --- | --- |
+| CUDA with BF16 support | BF16 |
+| Other CUDA | FP16 |
+| Apple MPS | FP16 |
+| CPU | FP32 |
+
+Use explicit values when reproducibility matters:
+
+```bash
+mira encode \
+  --device cuda:0 \
+  --dtype bfloat16 \
+  --help
+```
+
+MIRA rejects an unavailable device, invalid CUDA index, or BF16 on MPS. It does
+not switch precision after a model-load failure.
+
+## Model cache and network access
+
+Remote loading accepts only the audited model IDs and immutable revisions in
+the config. Transformers downloads standard safetensors and processor files
+with `trust_remote_code=False`.
+
+For an offline host, populate the Hugging Face cache first, then set the normal
+Hugging Face offline environment variables. MIRA still verifies the config's
+exact revision. A local path is treated as a MIRA checkpoint or export and
+requires its corresponding trusted manifest checksum.
+
+## Training environment
+
+The training adapter is pinned to MS-SWIFT 4.4.1 for source and compatibility
+auditing. Its Transformers range conflicts with the direct inference runtime,
+and its full dependency graph is not part of the released package extra.
+
+Keep training and direct inference in separate environments. From a repository
+checkout with the source-audited training dependencies available, run:
+
+```bash
 uv run mira doctor \
-  --config configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml \
-  --output-dir runs/doctor-qwen3-vl-2b \
-  > runs/doctor-qwen3-vl-2b/report.json
+  --workflow training \
+  --config configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml
 ```
 
-Qwen model weights, CUDA, NCCL, FlashAttention, and DeepSpeed were `NOT RUN` on
-the release host.
+The training doctor checks the MS-SWIFT tuple, CUDA, distributed variables,
+NCCL when the config requests distributed execution, and FlashAttention when
+selected. A schema-valid config is not proof that an accelerator path ran.
 
-## Optional FAISS evaluator
-
-Install the optional CPU FAISS evaluator with:
+## Build and inspect a wheel
 
 ```bash
-make sync-faiss
+make build
+python -m zipfile --list dist/mira_embed-*.whl
 ```
 
-FAISS availability depends on the Python version and platform. The exact PyTorch evaluator remains the reference when the optional module is absent.
-
-## Verify a built wheel
-
-Packaging changes require an isolated installation, not an import from the source tree:
+Install the wheel into a clean virtual environment without resolving a second
+dependency graph:
 
 ```bash
-ARTIFACT_DIR="$(mktemp -d)"
-make build ARTIFACT_DIR="$ARTIFACT_DIR"
-WHEEL="$ARTIFACT_DIR/mira_embed-0.1.0-py3-none-any.whl"
-test -f "$WHEEL"
-TMP_ENV="$(mktemp -d)/venv"
-uv venv "$TMP_ENV" --python 3.12
-uv export --frozen --no-dev --no-emit-project --output-file "$ARTIFACT_DIR/runtime.txt"
-uv pip install --python "$TMP_ENV/bin/python" --require-hashes --requirements "$ARTIFACT_DIR/runtime.txt"
-uv pip install --python "$TMP_ENV/bin/python" --no-deps "$WHEEL"
-uv pip check --python "$TMP_ENV/bin/python"
-"$TMP_ENV/bin/mira" --help
-"$TMP_ENV/bin/python" -c "import mira; print(mira.__version__)"
+uv export --frozen --no-dev --no-emit-project --output-file /tmp/mira-runtime.txt
+uv venv --python 3.12 /tmp/mira-wheel-smoke
+uv pip install \
+  --python /tmp/mira-wheel-smoke/bin/python \
+  --require-hashes \
+  --requirements /tmp/mira-runtime.txt
+uv pip install \
+  --python /tmp/mira-wheel-smoke/bin/python \
+  --no-deps \
+  dist/mira_embed-*.whl
+/tmp/mira-wheel-smoke/bin/mira --version
+/tmp/mira-wheel-smoke/bin/mira --help
 ```
 
-Run this smoke test against the wheel selected for release. Building a wheel alone does not prove that its entry point or package data work after installation.
+## Development gates
 
-## Current runtime evidence
+```bash
+make sync-inference
+make check
+make audit
+```
 
-The CPU reference path and two-rank Gloo collective test have run on the release host. The MS-SWIFT dependency installation is security-blocked. CUDA, NCCL, DeepSpeed, FlashAttention, and Qwen3-VL-Embedding 2B and 8B model weights are `NOT RUN`. See [release status](../release-status.md) before choosing a production environment.
+`make check` includes branch coverage. `make audit` checks all registry pins and
+exports separate base, development, FAISS, and inference requirement sets for
+`pip-audit`.

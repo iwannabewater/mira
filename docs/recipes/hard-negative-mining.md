@@ -6,15 +6,19 @@ The reference miner removes known positives, applies optional metadata and posit
 
 ## Command-line workflow
 
-Prepare two safe PyTorch bundles. Each bundle contains `item_ids`, an embedding matrix, and optional metadata aligned on the item axis. Prepare a JSON mapping from query ID to known positive corpus IDs.
+Prepare a v2 query artifact with `--role query` and a v2 corpus artifact with
+`--role document`. Keep the manifest SHA-256 printed by each encode command.
+Prepare a JSON mapping from query ID to known positive corpus IDs.
 
 Run:
 
 ```bash
 uv run mira mine \
-  --config configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml \
-  --queries queries.pt \
-  --corpus corpus.pt \
+  --config configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml \
+  --queries artifacts/queries \
+  --corpus artifacts/corpus \
+  --expected-queries-manifest-sha256 "$QUERY_MANIFEST_SHA256" \
+  --expected-corpus-manifest-sha256 "$CORPUS_MANIFEST_SHA256" \
   --positives positives.json \
   --output mined.jsonl \
   --manifest mining-manifest.json \
@@ -27,17 +31,20 @@ uv run mira mine \
   --metadata-key image_hash_group \
   --metadata-key duplicate_listing_group \
   --similarity-alpha 0.9 \
-  --model-checkpoint checkpoints/qwen3-vl-2b
+  --model-checkpoint Qwen/Qwen3-VL-Embedding-2B
 ```
 
-The config supplies model and instruction provenance. The command checksums the
-checkpoint and encoded collections. Repeat `--metadata-key` for each identity
+The config supplies model and instruction provenance. The command verifies the
+artifact roles, trusted manifests, model source identity, preprocessing
+fingerprint, dimension, and normalization rule. Repeat `--metadata-key` for each identity
 field that the run should enforce. `--similarity-alpha` enables the
 positive-aware rule. If you omit these flags, the CLI applies neither optional
 filter. Use `retrieve-k` larger than `top-k` so known positives and filtered
 false negatives do not exhaust the retrieved set.
 
-Do not load untrusted pickle content. Mining bundles must use the command's safe tensor-and-metadata shape, and their item IDs must be unique. Embeddings must be finite floating-point matrices with matching dimensions.
+The strict workflow accepts v2 safetensors artifacts, not legacy pickle-based
+collections. IDs must be unique, embeddings finite and normalized, and query
+and corpus dimensions must match.
 
 ## Python reference
 

@@ -22,7 +22,7 @@ from pydantic import (
 
 from mira.core.capabilities import Capability, ModelCapabilities
 from mira.core.exceptions import CapabilityError
-from mira.models.qwen_audit import AUDITED_QWEN_TARGETS
+from mira.models.qwen3_vl_embedding_audit import AUDITED_QWEN3_VL_EMBEDDING_TARGETS
 
 CONFIG_SCHEMA_VERSION = 1
 _WEIGHT_TOLERANCE = 1e-6
@@ -276,7 +276,7 @@ class ModelConfig(_StrictModel):
 
     @model_validator(mode="after")
     def _qwen_target_is_immutable_and_audited(self) -> Self:
-        expected = AUDITED_QWEN_TARGETS.get(self.name_or_path)
+        expected = AUDITED_QWEN3_VL_EMBEDDING_TARGETS.get(self.name_or_path)
         if self.adapter is ModelAdapterType.QWEN3_VL_EMBEDDING and expected is None:
             raise ValueError("qwen3_vl_embedding accepts only the two audited model IDs")
         if expected is not None:
@@ -290,7 +290,8 @@ class ModelConfig(_StrictModel):
                 )
             if self.licenses != expected.licenses:
                 raise ValueError(
-                    f"audited Qwen targets require licenses: {list(expected.licenses)}"
+                    "audited Qwen3-VL-Embedding targets require licenses: "
+                    f"{list(expected.licenses)}"
                 )
         return self
 
@@ -664,7 +665,7 @@ class MiraConfig(_StrictModel):
             and tuning.lora.target_modules != "all-linear"
         ):
             raise ValueError(
-                "trainable Qwen vision or aligner components require "
+                "trainable Qwen3-VL-Embedding vision or aligner components require "
                 "model.tuning.lora.target_modules=all-linear"
             )
         planned = {
@@ -676,7 +677,7 @@ class MiraConfig(_StrictModel):
         enabled_planned = tuple(name for name, value in planned.items() if value.trainable)
         if enabled_planned:
             raise ValueError(
-                "Phase-1 Qwen training does not implement planned components: "
+                "Phase-1 Qwen3-VL-Embedding training does not implement planned components: "
                 + ", ".join(enabled_planned)
             )
         required: list[Capability] = []

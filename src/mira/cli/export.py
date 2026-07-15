@@ -32,7 +32,7 @@ def export_command(
         typer.Option("--expected-checkpoint-manifest-sha256"),
     ] = None,
 ) -> None:
-    """Export reloadable Qwen assets with checksum-protected semantics."""
+    """Export reloadable Qwen3-VL-Embedding assets with protected semantics."""
     resolved = resolve_config(config)
     checkpoint_path = Path(checkpoint).expanduser()
     if not is_mira_checkpoint(checkpoint_path):
@@ -77,7 +77,7 @@ def export_command(
                 "attention": resolved.config.runtime.attention,
                 "image_max_tokens": resolved.config.data.media.image_max_tokens,
             },
-            template="qwen3_vl_emb",
+            template="qwen3_vl_embedding",
             tokenizer=type(tokenizer).__qualname__,
             processor=processor_name,
             artifact_checksums=artifact_checksums,

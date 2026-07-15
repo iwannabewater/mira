@@ -5,7 +5,7 @@ This product includes original interoperability code and documentation informed 
 MS-SWIFT, Copyright ModelScope Contributors, licensed under the Apache License 2.0.
 https://github.com/modelscope/ms-swift
 
-This product contains an experimental adapter boundary for models published by the Qwen
+This product contains an experimental adapter boundary for Qwen3-VL-Embedding models published by the Qwen
 team. Model weights, configuration, and associated code retain their own license and
 attribution. MIRA Phase-1 training checkpoints record model and dataset license provenance.
 Export manifests record the selected model revision and model license, but do not transfer

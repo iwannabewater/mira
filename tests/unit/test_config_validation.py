@@ -17,7 +17,7 @@ from mira.config import (
 )
 from mira.core import ConfigurationValidationError
 
-FIXTURE = Path(__file__).parents[1] / "fixtures" / "configs" / "qwen3_vl_ecommerce.yaml"
+FIXTURE = Path(__file__).parents[1] / "fixtures" / "configs" / "qwen3_vl_embedding_ecommerce.yaml"
 
 
 def _mapping() -> dict[str, Any]:

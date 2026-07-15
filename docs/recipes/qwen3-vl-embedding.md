@@ -1,134 +1,155 @@
-# Qwen3-VL-Embedding recipe
+# Qwen3-VL-Embedding
 
-Status: adapter contracts implemented; backend installation security-blocked;
-model-weight execution `NOT RUN`.
+MIRA supports the official 2B and 8B embedding checkpoints at audited immutable
+revisions:
 
-MIRA targets `Qwen/Qwen3-VL-Embedding-2B` and `Qwen/Qwen3-VL-Embedding-8B` through the audited MS-SWIFT 4.4.1 boundary. The release host did not run either checkpoint, CUDA, NCCL, FlashAttention, or DeepSpeed.
+| Model | Revision | Global dimension |
+| --- | --- | ---: |
+| `Qwen/Qwen3-VL-Embedding-2B` | `9f2f7e710d6d81056aa5c0a4f04764fec6bb7bda` | 2048 |
+| `Qwen/Qwen3-VL-Embedding-8B` | `2c4565515e0f265c6511776e7193b22c0968ddc7` | 4096 |
 
-## Representation contract
+The direct inference backend uses the Transformers implementation class
+`Qwen3VLModel`. That class name describes the underlying architecture; every
+MIRA model ID, capability, error, config, and public document refers to the
+embedding model as Qwen3-VL-Embedding.
 
-The adapter follows these fixed semantics:
+## Install inference
 
-- default instruction: `Represent the user's input.`
-- one global vector from the last valid EOS token
-- L2 normalization after optional MRL truncation
-- 2,048 dimensions for the 2B model
-- 4,096 dimensions for the 8B model
-- text, image, video, and mixed-modal inputs
-- no declared audio or stable token-vector output
+```bash
+uv sync --frozen --extra inference-qwen3-vl-embedding
+uv run mira doctor \
+  --workflow inference \
+  --config configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml
+```
 
-Every encoded row must end in the configured EOS token. Training and inference batches must carry the same instruction and template fingerprint as the loaded adapter. Mismatches raise an error.
+The direct backend owns prompt construction, media verification, last-token
+pooling, optional MRL truncation, and L2 normalization. It does not use
+MS-SWIFT for inference.
 
-## Backend security boundary
+## Encode the official model
 
-MIRA 0.1 does not publish an `ms-swift` extra. MS-SWIFT 4.4.1 requires
-`gradio<6`; the compatible dependency resolution retains known advisories in
-Gradio, Pillow, and Starlette. Patched versions fall outside the audited
-upstream graph, so the release security gate blocks backend installation.
-There is no supported Qwen environment command for this release.
+```bash
+uv run mira encode \
+  --checkpoint Qwen/Qwen3-VL-Embedding-2B \
+  --config configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml \
+  --input data/documents.jsonl \
+  --output artifacts/qwen3-vl-embedding-2b-documents \
+  --role document \
+  --batch-size 8 \
+  --shard-size 4096
+```
 
-The adapter remains dependency-lazy so the CPU framework can be installed and
-audited without that graph. Re-audit the resolved dependency set before adding
-a future backend extra. A manual MS-SWIFT installation is outside the supported
-release boundary and does not change any `NOT RUN` status.
+Remote model loading uses the official preprocessing profile and the revision
+from the config. `--checkpoint` cannot name another repository or a mutable
+branch.
 
-Inspect the single-GPU 2B experiment before downloading weights:
+Use `--dimension 512` or `--dimension 1024` for a trained Matryoshka prefix.
+MIRA truncates the raw global vector first and normalizes the prefix afterward.
+
+## Input contract
+
+Text-only item:
+
+```json
+{"item_id":"item-1","messages":[{"role":"user","content":"Represent this product description."}]}
+```
+
+Mixed-modal item:
+
+```json
+{"item_id":"item-2","messages":[{"role":"user","content":"Product image: <image> Product video: <video>"}],"images":[{"uri":"media/item-2.png","checksum":"sha256:<digest>"}],"videos":[{"uri":"media/item-2.mp4","checksum":"sha256:<digest>"}]}
+```
+
+Messages alternate `user` and `assistant`, start with `user`, and end with
+`user`. Media references follow placeholder order exactly. Qwen3-VL-Embedding
+does not declare audio support.
+
+The CLI confines media paths to the JSONL directory. Python callers use
+absolute verified paths. Both paths fail on checksum drift and never replace a
+failed image or video with placeholder content.
+
+## Load a trained MIRA checkpoint
+
+```python
+from mira.inference import load_encoder
+
+encoder = load_encoder(
+    "runs/qwen3-vl-embedding-2b/checkpoint-step-1000",
+    "configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml",
+    expected_checkpoint_manifest_sha256="<trusted manifest SHA-256>",
+)
+```
+
+Native checkpoint inference uses the `mira_v1` preprocessing profile so the
+prompt matches training. MIRA verifies model name, revision, and config
+checksum, reconstructs the configured LoRA, DoRA, or RS-LoRA topology, then
+loads model-only state. QLoRA requires a future quantized inference contract
+and fails explicitly today.
+
+## Export and reload
+
+Export a native checkpoint:
+
+```bash
+uv run mira export \
+  --checkpoint runs/qwen3-vl-embedding-2b/checkpoint-step-1000 \
+  --config configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml \
+  --output-dir exports/qwen3-vl-embedding-2b \
+  --expected-checkpoint-manifest-sha256 "<trusted checkpoint manifest SHA-256>"
+```
+
+The command safely merges a configured PEFT adapter, writes safetensors and
+processor assets, records `pooling=last_token`, and prints the export manifest
+checksum.
+
+Reload the export:
+
+```python
+encoder = load_encoder(
+    "exports/qwen3-vl-embedding-2b",
+    "configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml",
+    expected_export_manifest_checksum="<checksum printed by mira export>",
+)
+```
+
+Local exports are copied into a checksum-verified private snapshot before
+Transformers sees them. Executable formats, remote-code metadata, symlinks,
+unexpected files, and checksum drift are rejected.
+
+## Training boundary
+
+The reference config declares:
+
+- multi-positive InfoNCE and false-negative masking
+- MRL dimensions 512, 1024, and 2048
+- LoRA target selection and component learning rates
+- BF16, SDPA, gradient checkpointing, and one-device runtime intent
+- checksummed train and validation datasets
+
+Inspect and validate it without loading model weights:
 
 ```bash
 uv run mira inspect \
-  --config configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml
-
-mkdir -p runs/doctor-qwen3-vl-2b
-uv run mira doctor \
-  --config configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml \
-  --output-dir runs/doctor-qwen3-vl-2b \
-  > runs/doctor-qwen3-vl-2b/report.json
-```
-
-`mira doctor` emits JSON to standard output and exits with status 1 when a
-required check fails. `--output-dir` is a writeability probe, not a report
-destination. Failure is expected in the base environment because the backend
-dependencies and CUDA runtime are absent. Preserve the JSON as failure evidence
-rather than relabeling it as a pass.
-
-Preserve the resolved config, dependency versions, model revision, model-file
-checksums, and doctor output. The model and dataset licenses are separate from
-MIRA's Apache 2.0 license. The bundled config uses `licenses: [NOASSERTION]` for
-example datasets. That value records an unresolved license conclusion; it does
-not grant permission to use or redistribute data. Replace it with the
-applicable SPDX identifier or documented `LicenseRef-*` before using real data.
-
-## Prepare data
-
-The 2B config expects:
-
-```text
-data/train.jsonl
-data/validation.jsonl
-```
-
-Each line must follow the [retrieval schema](../data/schema.md). Use a media placeholder for every referenced image or video. The optional backend must receive already validated records; it must not select only the first positive or replace a failed media item with fallback text.
-
-Validate the files:
-
-```bash
+  --config configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml
 uv run mira validate-data \
-  --config configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml
+  --config configs/experiments/qwen3_vl_embedding_2b_single_gpu_lora.yaml
 ```
 
-The config uses the `all-linear` LoRA selector, then explicit component groups keep the vision tower frozen while training the language model and aligner. It also uses SDPA attention, BF16 precision, a local candidate pool, four explicit hard negatives, and MRL dimensions 512, 1024, and 2048. These are declared experiment settings, not measured recommendations.
+Training construction remains behind the pinned MS-SWIFT 4.4.1 adapter. Keep
+its environment separate from direct inference because the supported
+Transformers ranges do not overlap. Run `mira doctor --workflow training`
+before any hardware job, and keep unavailable CUDA, NCCL, FlashAttention,
+DeepSpeed, or model-size checks recorded as `NOT RUN`.
 
-## Experimental training command
+## Current capability status
 
-After a compatible MS-SWIFT dependency graph passes security review and an
-accelerator environment is recorded, the intended smoke command is:
-
-```bash
-uv run mira train \
-  --config configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml \
-  --output-dir runs/qwen3-vl-2b-lora-smoke \
-  --max-steps 10
-```
-
-This command was `NOT RUN` on the release host. It is also blocked by the
-MS-SWIFT dependency audit in this release. A successful schema check, import,
-mocked model test, or CPU objective test does not change that status.
-
-## Evidence required from the first hardware run
-
-Keep the following artifacts together:
-
-- resolved config and SHA-256 checksum
-- exact model repository revision and model-file checksums
-- template fingerprint and instruction
-- dependency, driver, GPU, dtype, and attention-backend report
-- training log with finite loss, norms, and gradient diagnostics
-- checkpoint manifest and an exact resume check
-- validation metrics at every configured MRL dimension
-- exported inference manifest plus reload and encode parity
-
-Use `mira encode`, `mira evaluate`, and `mira export` only with a verified
-native MIRA checkpoint. The evaluator consumes encoded query and candidate
-bundles plus a versioned relevance tensor; it does not encode raw data itself:
-
-```bash
-uv run mira evaluate \
-  --checkpoint runs/qwen3-vl-2b-lora-smoke \
-  --config configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml \
-  --queries artifacts/qwen3-vl-2b-validation-queries.pt \
-  --candidates artifacts/qwen3-vl-2b-validation-candidates.pt \
-  --relevance artifacts/qwen3-vl-2b-validation-relevance.pt \
-  --output artifacts/qwen3-vl-2b-validation-report.json
-
-uv run mira export \
-  --checkpoint runs/qwen3-vl-2b-lora-smoke \
-  --config configs/experiments/qwen3_vl_2b_single_gpu_lora.yaml \
-  --output-dir exports/qwen3-vl-2b-lora-smoke
-```
-
-The export command emits `manifest_checksum`. Preserve that value through a
-trusted channel. Any later command that uses the export directory as
-`--checkpoint` must also pass it as `--expected-export-manifest-checksum`; MIRA
-loads only a private snapshot of the exact verified artifact set.
-
-Do not publish a model result until those commands succeed against the actual trained artifact and the resulting manifests have been inspected.
+| Capability | Status |
+| --- | --- |
+| Text, image, video, and mixed-modal global inference | Implemented |
+| Official 2B model direct runtime | Verified where listed in the release ledger |
+| 8B model construction contract | Implemented; hardware evidence is tracked separately |
+| MRL global prefixes | Implemented |
+| Audio | Unsupported by the model contract |
+| Token and hybrid embeddings | Planned |
+| Silent truncation or media fallback | Prohibited |
+| Remote custom code | Prohibited |
